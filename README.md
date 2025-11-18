@@ -2,8 +2,33 @@
 
 [An MCP server](https://modelcontextprotocol.io/introduction) and CLI tool for searching and downloading documents from [Anna's Archive](https://annas-archive.org)
 
-> [!NOTE]
-> Notwithstanding prevailing public sentiment regarding Anna's Archive, the platform serves as a comprehensive repository for automated retrieval of documents released under permissive licensing frameworks (including Creative Commons publications and public domain materials). This software does not endorse unauthorized acquisition of copyrighted content and should be regarded solely as a utility. Users are urged to respect the intellectual property rights of authors and acknowledge the considerable effort invested in document creation.
+## ⚠️ Legal Disclaimer
+
+**IMPORTANT: This software is intended for LEGAL USE ONLY.**
+
+This tool is designed to help you access and download materials that are:
+- **Public domain** works
+- **Creative Commons** licensed materials
+- **Open access** academic papers and publications
+- Other materials that are **legally available** for download
+
+**DO NOT use this software to:**
+- Download copyrighted materials without proper authorization
+- Access or distribute content in violation of copyright laws
+- Bypass any legal restrictions on content access
+
+**By using this software, you agree to:**
+- Use it only for legally permissible purposes
+- Respect intellectual property rights
+- Comply with all applicable copyright laws in your jurisdiction
+- Accept full responsibility for your use of this tool
+
+The authors and contributors of this software:
+- Do not endorse or condone copyright infringement
+- Are not responsible for any illegal use of this software
+- Provide this tool "as-is" for educational and legal purposes only
+
+**If you are unsure whether a work is in the public domain or legally available, do not download it. Consult with legal counsel if necessary.**
 
 ## Available Operations
 
