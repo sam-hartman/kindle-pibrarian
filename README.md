@@ -221,13 +221,3 @@ The server exposes these endpoints:
 
 - [LE_CHAT_SETUP.md](LE_CHAT_SETUP.md) - Setup guide for Mistral Le Chat
 - [KINDLE_EMAIL_SETUP.md](KINDLE_EMAIL_SETUP.md) - Guide for emailing books to Kindle
-
-## Demo
-
-### As an MCP Server
-
-<img src="screenshots/claude.png" width="600px"/>
-
-### As a CLI Tool
-
-<img src="screenshots/cli.png" width="400px"/>
