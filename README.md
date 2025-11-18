@@ -74,13 +74,70 @@ ANNAS_SECRET_KEY=your-api-key-here
 # Optional: Download path (defaults to temp directory)
 ANNAS_DOWNLOAD_PATH=/path/to/downloads
 
-# Optional: Email settings for Kindle (see KINDLE_EMAIL_SETUP.md)
+# Optional: Email settings for Kindle (see detailed instructions below)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
 SMTP_PASSWORD=your-app-password
 FROM_EMAIL=your-email@gmail.com
 KINDLE_EMAIL=your-kindle-email@kindle.com
+```
+
+### 2.1. Setting Up Kindle Email (Optional)
+
+If you want to email books directly to your Kindle, follow these steps:
+
+#### Step 1: Get a Gmail App Password
+
+1. **Enable 2-Factor Authentication** on your Google account (required for app passwords):
+   - Go to https://myaccount.google.com/security
+   - Under "Signing in to Google", click "2-Step Verification"
+   - Follow the prompts to enable it
+
+2. **Create an App Password**:
+   - Go to https://myaccount.google.com/apppasswords
+   - You may need to sign in again
+   - Under "Select app", choose **"Mail"**
+   - Under "Select device", choose **"Other (Custom name)"**
+   - Enter a name like "Anna's Archive MCP" and click "Generate"
+   - **Copy the 16-character password** (it will look like: `abcd efgh ijkl mnop`)
+   - This is your `SMTP_PASSWORD` - use it exactly as shown (with or without spaces, both work)
+
+#### Step 2: Find Your Kindle Email Address
+
+1. Go to [Amazon's Manage Your Content and Devices page](https://www.amazon.com/hz/mycd/digital-console/alldevices)
+2. Sign in with your Amazon account
+3. Click on **"Settings"** (or go to **"Preferences"** → **"Personal Document Settings"**)
+4. Scroll down to **"Send-to-Kindle Email Settings"**
+5. You'll see your Kindle email address(es) listed (e.g., `yourname_123@kindle.com` or `yourname_123@free.kindle.com`)
+6. **Copy this email address** - this is your `KINDLE_EMAIL`
+
+**Note:** If you have multiple Kindles, each will have its own email address. Use the one for the device you want to receive books.
+
+#### Step 3: Whitelist Your Email Address in Kindle Settings
+
+**Important:** Amazon will reject emails from addresses that aren't whitelisted. You must add your sending email to the approved list.
+
+1. On the same **"Personal Document Settings"** page (from Step 2)
+2. Scroll to **"Approved Personal Document E-mail List"**
+3. Click **"Add a new approved e-mail address"**
+4. Enter the email address you'll use to send books (your `FROM_EMAIL` - typically your Gmail address)
+5. Click **"Add Address"**
+6. You should see a confirmation message
+
+**Note:** It may take a few minutes for the whitelist to take effect. If emails are rejected, wait 5-10 minutes and try again.
+
+#### Step 4: Update Your `.env` File
+
+After completing the above steps, update your `.env` file with:
+
+```bash
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=abcd efgh ijkl mnop  # Your 16-character app password
+FROM_EMAIL=your-email@gmail.com    # Must match the whitelisted email
+KINDLE_EMAIL=yourname_123@kindle.com  # Your Kindle email from Step 2
 ```
 
 ### 3. Start the Server
