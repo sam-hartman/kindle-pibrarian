@@ -1,8 +1,11 @@
 package modes
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
+	"net/smtp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +17,67 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
+
+// sendTestFileToKindle sends a test file to Kindle to verify email configuration
+func sendTestFileToKindle(fileData []byte, filename string, book *anna.Book, env *Env) error {
+	l := logger.GetLogger()
+
+	// Determine MIME type based on format
+	mimeType := "application/pdf"
+	if strings.HasSuffix(filename, ".epub") {
+		mimeType = "application/epub+zip"
+	}
+
+	// Create email message
+	var emailBody bytes.Buffer
+	emailBody.WriteString(fmt.Sprintf("From: %s\r\n", env.FromEmail))
+	emailBody.WriteString(fmt.Sprintf("To: %s\r\n", env.KindleEmail))
+	emailBody.WriteString(fmt.Sprintf("Subject: %s\r\n", filename))
+	emailBody.WriteString("MIME-Version: 1.0\r\n")
+	emailBody.WriteString(fmt.Sprintf("Content-Type: multipart/mixed; boundary=boundary123\r\n\r\n"))
+	
+	// Email body
+	emailBody.WriteString("--boundary123\r\n")
+	emailBody.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
+	emailBody.WriteString(fmt.Sprintf("Test Book: %s\r\n", book.Title))
+	emailBody.WriteString("This is a test email to verify Kindle email functionality.\r\n")
+	emailBody.WriteString("\r\n")
+	
+	// Attachment
+	emailBody.WriteString("--boundary123\r\n")
+	emailBody.WriteString(fmt.Sprintf("Content-Type: %s; name=\"%s\"\r\n", mimeType, filename))
+	emailBody.WriteString("Content-Transfer-Encoding: base64\r\n")
+	emailBody.WriteString(fmt.Sprintf("Content-Disposition: attachment; filename=\"%s\"\r\n\r\n", filename))
+	
+	// Encode file as base64
+	encoded := base64.StdEncoding.EncodeToString(fileData)
+	// Split into lines of 76 characters (RFC 2045)
+	for i := 0; i < len(encoded); i += 76 {
+		end := i + 76
+		if end > len(encoded) {
+			end = len(encoded)
+		}
+		emailBody.WriteString(encoded[i:end] + "\r\n")
+	}
+	
+	emailBody.WriteString("\r\n--boundary123--\r\n")
+
+	// Send email via SMTP
+	addr := fmt.Sprintf("%s:%s", env.SMTPHost, env.SMTPPort)
+	auth := smtp.PlainAuth("", env.SMTPUser, env.SMTPPassword, env.SMTPHost)
+
+	l.Info("Sending test file to Kindle",
+		zap.String("filename", filename),
+		zap.String("kindle_email", env.KindleEmail),
+	)
+
+	err := smtp.SendMail(addr, auth, env.FromEmail, []string{env.KindleEmail}, emailBody.Bytes())
+	if err != nil {
+		return fmt.Errorf("failed to send email: %w", err)
+	}
+
+	return nil
+}
 
 func StartCLI() {
 	l := logger.GetLogger()
@@ -141,9 +205,70 @@ func StartCLI() {
 		},
 	}
 
+	httpCmd := &cobra.Command{
+		Use:   "http",
+		Short: "Start the MCP HTTP server",
+		Long:  "Start the MCP server as an HTTP server for integration with HTTP-based MCP clients like Mistral Le Chat.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			port, _ := cmd.Flags().GetString("port")
+			StartMCPHTTPServer(port)
+			return nil
+		},
+	}
+	httpCmd.Flags().StringP("port", "p", "8080", "Port to listen on")
+
+	testEmailCmd := &cobra.Command{
+		Use:   "test-email",
+		Short: "Test email functionality by sending a sample file to Kindle",
+		Long:  "Creates a small test file and sends it to your Kindle email to verify email configuration.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			env, err := GetEnv()
+			if err != nil {
+				return fmt.Errorf("failed to get environment: %w", err)
+			}
+
+			// Check if email is configured
+			if env.SMTPHost == "" || env.SMTPUser == "" || env.SMTPPassword == "" || env.FromEmail == "" {
+				return fmt.Errorf("email configuration incomplete. Please set SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and FROM_EMAIL")
+			}
+
+			l.Info("Testing email functionality",
+				zap.String("from", env.FromEmail),
+				zap.String("to", env.KindleEmail),
+				zap.String("smtp", env.SMTPHost+":"+env.SMTPPort),
+			)
+
+			// Create a simple test file (small PDF content)
+			testContent := []byte("%PDF-1.4\n1 0 obj\n<<\n/Type /Catalog\n>>\nendobj\nxref\n0 1\ntrailer\n<<\n/Size 1\n>>\nstartxref\n9\n%%EOF")
+			filename := "test-book.pdf"
+
+			// Create a temporary book object for emailing
+			book := &anna.Book{
+				Title:  "Test Book - Email Functionality",
+				Format: "pdf",
+			}
+
+			// Use a helper function to send the test file
+			err = sendTestFileToKindle(testContent, filename, book, env)
+			if err != nil {
+				return fmt.Errorf("failed to send test email: %w", err)
+			}
+
+			fmt.Printf("✅ Test email sent successfully!\n")
+			fmt.Printf("   From: %s\n", env.FromEmail)
+			fmt.Printf("   To: %s\n", env.KindleEmail)
+			fmt.Printf("   Check your Kindle or Kindle app in a few minutes.\n")
+			return nil
+		},
+	}
+
 	rootCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(downloadCmd)
 	rootCmd.AddCommand(mcpCmd)
+	rootCmd.AddCommand(httpCmd)
+	rootCmd.AddCommand(testEmailCmd)
 
 	if err := fang.Execute(
 		context.Background(),

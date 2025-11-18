@@ -6,3 +6,16 @@ dist
 
 # Binaries
 /annas-mcp
+
+# Email configuration (contains sensitive passwords)
+setup-email-env.sh
+
+# Environment variables (contains sensitive API keys and passwords)
+.env
+
+# Superfluous/test files
+SECURITY_AUDIT.md
+AGENT_SYSTEM_PROMPT.md
+AGENT_SYSTEM_PROMPT.txt
+Pride and Prejudice.epub
+test-connector.sh
