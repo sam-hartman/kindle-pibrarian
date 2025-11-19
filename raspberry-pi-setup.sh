@@ -4,12 +4,18 @@
 
 set -e
 
-USER_HOME=$(eval echo ~$USER)
+# Get the actual user who invoked sudo
+ACTUAL_USER=${SUDO_USER:-$USER}
+if [ "$ACTUAL_USER" = "root" ]; then
+    ACTUAL_USER="pi"
+fi
+USER_HOME=$(eval echo ~$ACTUAL_USER)
 PROJECT_DIR="$USER_HOME/annas-mcp-server"
 CLOUDFLARED_PATH="/tmp/cloudflared"
 
 echo "Setting up systemd services for Anna's Archive MCP Server"
 echo "Project directory: $PROJECT_DIR"
+echo "User: $ACTUAL_USER"
 echo ""
 
 # Check if running as root
@@ -27,7 +33,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=$SUDO_USER
+User=$ACTUAL_USER
 WorkingDirectory=$PROJECT_DIR
 ExecStart=$PROJECT_DIR/annas-mcp http --port 8081
 Restart=always
@@ -61,7 +67,7 @@ Requires=annas-mcp.service
 
 [Service]
 Type=simple
-User=$SUDO_USER
+User=$ACTUAL_USER
 ExecStart=$CLOUDFLARED_PATH tunnel --url http://localhost:8081
 Restart=always
 RestartSec=10
