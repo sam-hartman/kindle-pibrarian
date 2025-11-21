@@ -1,0 +1,228 @@
+#!/bin/bash
+# Complete deployment script for Raspberry Pi with permanent Cloudflare tunnel
+# Run this from your Mac
+
+set -e
+
+PI_HOST="192.168.1.201"
+PI_USER="pi"
+PI_PASS="test"
+PI_HOME="/home/pi"
+PROJECT_DIR="$PI_HOME/annas-mcp-server"
+CLOUDFLARE_API_TOKEN="iGhefDuggUpnE7VDMSdrSwi6oJrMelUgvlg6ylnJ"
+TUNNEL_NAME="annas-mcp"
+
+echo "🚀 Deploying Anna's Archive MCP Server to Raspberry Pi"
+echo "Host: $PI_USER@$PI_HOST"
+echo ""
+
+# Function to run commands on Pi via SSH
+ssh_pi() {
+    sshpass -p "$PI_PASS" ssh -o StrictHostKeyChecking=no "$PI_USER@$PI_HOST" "$@"
+}
+
+# Function to copy files to Pi
+scp_pi() {
+    sshpass -p "$PI_PASS" scp -o StrictHostKeyChecking=no "$@"
+}
+
+echo "📦 Step 1: Cloning/updating repository..."
+ssh_pi "cd $PI_HOME && [ -d annas-mcp-server ] && (echo 'Repository exists, pulling updates...' && cd annas-mcp-server && git pull) || (echo 'Cloning repository...' && git clone https://github.com/sam-hartman-mistral/annas-mcp-server.git annas-mcp-server)"
+
+echo ""
+echo "🔨 Step 2: Installing Go and building application..."
+# Check if Go is installed, install if not
+ssh_pi "command -v go >/dev/null 2>&1 || (echo 'Installing Go...' && wget -q https://go.dev/dl/go1.23.4.linux-armv6l.tar.gz && sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.23.4.linux-armv6l.tar.gz && rm go1.23.4.linux-armv6l.tar.gz && echo 'export PATH=\$PATH:/usr/local/go/bin' >> ~/.bashrc && export PATH=\$PATH:/usr/local/go/bin)"
+# Build the application
+ssh_pi "cd $PROJECT_DIR && export PATH=\$PATH:/usr/local/go/bin && go build -o annas-mcp ./cmd/annas-mcp"
+
+echo ""
+echo "⚙️  Step 3: Setting up .env file..."
+# Create .env file on Pi
+ssh_pi "cat > $PROJECT_DIR/.env << 'ENVEOF'
+# Anna's Archive MCP Configuration
+ANNAS_SECRET_KEY=75qvjCeMrSR6LgmR167oG2Wk4uDe5
+ANNAS_DOWNLOAD_PATH=/home/pi/Downloads/Anna's Archive
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=sam.c.hartman@gmail.com
+SMTP_PASSWORD=qztx aonu afxr qfsg
+FROM_EMAIL=sam.c.hartman@gmail.com
+KINDLE_EMAIL=sam.c.hartman_wvmqMN@kindle.com
+ENVEOF
+"
+
+echo ""
+echo "📥 Step 4: Downloading cloudflared..."
+ssh_pi "wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm -O /tmp/cloudflared && chmod +x /tmp/cloudflared"
+
+echo ""
+echo "🛑 Step 5: Stopping any existing services..."
+ssh_pi "sudo systemctl stop annas-mcp cloudflared-tunnel 2>/dev/null || true"
+ssh_pi "pkill -f annas-mcp || true"
+ssh_pi "pkill -f cloudflared || true"
+sleep 2
+
+echo ""
+echo "🔐 Step 6: Setting up Cloudflare tunnel..."
+# Create cloudflared config directory
+ssh_pi "mkdir -p ~/.cloudflared"
+
+# Try to create tunnel using cloudflared with API token
+echo "Creating tunnel '$TUNNEL_NAME'..."
+TUNNEL_CREATE_OUTPUT=$(ssh_pi "export CLOUDFLARE_API_TOKEN='${CLOUDFLARE_API_TOKEN}' && /tmp/cloudflared tunnel create $TUNNEL_NAME 2>&1" || true)
+
+echo "$TUNNEL_CREATE_OUTPUT"
+
+# Check if tunnel exists or was created
+TUNNEL_EXISTS=false
+if echo "$TUNNEL_CREATE_OUTPUT" | grep -q "already exists\|Created tunnel\|Tunnel created"; then
+    TUNNEL_EXISTS=true
+    echo "✅ Tunnel '$TUNNEL_NAME' exists or was created"
+elif echo "$TUNNEL_CREATE_OUTPUT" | grep -q "error\|Error\|ERROR"; then
+    echo "⚠️  Tunnel creation had issues, but continuing..."
+    # Check if tunnel already exists
+    TUNNEL_LIST=$(ssh_pi "export CLOUDFLARE_API_TOKEN='${CLOUDFLARE_API_TOKEN}' && /tmp/cloudflared tunnel list 2>&1" || echo "")
+    if echo "$TUNNEL_LIST" | grep -q "$TUNNEL_NAME"; then
+        TUNNEL_EXISTS=true
+        echo "✅ Tunnel '$TUNNEL_NAME' already exists"
+    fi
+fi
+
+# Get tunnel ID
+TUNNEL_ID=$(ssh_pi "export CLOUDFLARE_API_TOKEN='${CLOUDFLARE_API_TOKEN}' && /tmp/cloudflared tunnel list 2>&1 | grep '$TUNNEL_NAME' | awk '{print \$1}' | head -1" || echo "")
+
+if [ -z "$TUNNEL_ID" ]; then
+    # Try to get from credentials files
+    TUNNEL_ID=$(ssh_pi "ls ~/.cloudflared/*.json 2>/dev/null | head -1 | xargs basename | sed 's/.json//' || echo ''")
+fi
+
+if [ -z "$TUNNEL_ID" ] && [ "$TUNNEL_EXISTS" = true ]; then
+    echo "⚠️  Could not extract tunnel ID, but tunnel exists. Will use tunnel name instead."
+    TUNNEL_ID="$TUNNEL_NAME"
+fi
+
+if [ -z "$TUNNEL_ID" ]; then
+    echo "❌ Could not determine tunnel ID. Falling back to quick tunnel mode."
+    TUNNEL_MODE="quick"
+else
+    echo "Using Tunnel ID: $TUNNEL_ID"
+    TUNNEL_MODE="named"
+    
+    # Create config file for named tunnel
+    echo "Creating tunnel configuration..."
+    ssh_pi "cat > ~/.cloudflared/config.yml << 'CONFEOF'
+tunnel: $TUNNEL_ID
+credentials-file: /home/pi/.cloudflared/${TUNNEL_ID}.json
+
+ingress:
+  - service: http://localhost:8081
+CONFEOF
+"
+fi
+
+echo ""
+echo "🔧 Step 7: Setting up systemd services..."
+# Copy raspberry-pi-setup.sh to Pi
+scp_pi raspberry-pi-setup.sh "$PI_USER@$PI_HOST:$PROJECT_DIR/raspberry-pi-setup.sh"
+ssh_pi "chmod +x $PROJECT_DIR/raspberry-pi-setup.sh"
+
+# Update raspberry-pi-setup.sh to use named tunnel if we have one
+if [ "$TUNNEL_MODE" = "named" ]; then
+    echo "Updating systemd service to use named tunnel..."
+    ssh_pi "sudo bash -c 'cat > /etc/systemd/system/cloudflared-tunnel.service << \"EOF\"
+[Unit]
+Description=Cloudflare Tunnel for Anna'\''s Archive MCP
+After=network.target annas-mcp.service
+Requires=annas-mcp.service
+
+[Service]
+Type=simple
+User=$PI_USER
+Environment=\"CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}\"
+ExecStart=/tmp/cloudflared tunnel run $TUNNEL_ID
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cloudflared-tunnel
+
+[Install]
+WantedBy=multi-user.target
+EOF'"
+else
+    # Use quick tunnel mode
+    ssh_pi "sudo bash -c 'cat > /etc/systemd/system/cloudflared-tunnel.service << \"EOF\"
+[Unit]
+Description=Cloudflare Tunnel for Anna'\''s Archive MCP
+After=network.target annas-mcp.service
+Requires=annas-mcp.service
+
+[Service]
+Type=simple
+User=$PI_USER
+ExecStart=/tmp/cloudflared tunnel --url http://localhost:8081
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cloudflared-tunnel
+
+[Install]
+WantedBy=multi-user.target
+EOF'"
+fi
+
+# Run raspberry-pi-setup.sh to create MCP server service
+ssh_pi "sudo bash $PROJECT_DIR/raspberry-pi-setup.sh"
+
+# Reload systemd
+ssh_pi "sudo systemctl daemon-reload"
+
+echo ""
+echo "▶️  Step 8: Starting services..."
+ssh_pi "sudo systemctl enable annas-mcp"
+ssh_pi "sudo systemctl enable cloudflared-tunnel"
+ssh_pi "sudo systemctl start annas-mcp"
+sleep 3
+ssh_pi "sudo systemctl start cloudflared-tunnel"
+sleep 5
+
+echo ""
+echo "✅ Deployment complete!"
+echo ""
+echo "Checking server status..."
+ssh_pi "sudo systemctl status annas-mcp --no-pager -l | head -15"
+echo ""
+echo "Checking tunnel status..."
+ssh_pi "sudo systemctl status cloudflared-tunnel --no-pager -l | head -15"
+
+echo ""
+echo "🔍 Getting Cloudflare tunnel URL..."
+if [ "$TUNNEL_MODE" = "named" ]; then
+    echo "For named tunnel, check Cloudflare dashboard:"
+    echo "  https://one.dash.cloudflare.com -> Networks -> Tunnels -> $TUNNEL_NAME"
+    echo ""
+    echo "Or check tunnel info:"
+    ssh_pi "export CLOUDFLARE_API_TOKEN='${CLOUDFLARE_API_TOKEN}' && /tmp/cloudflared tunnel info $TUNNEL_ID 2>&1 | head -20"
+else
+    echo "Quick tunnel URL:"
+    ssh_pi "sudo journalctl -u cloudflared-tunnel -n 50 --no-pager | grep 'trycloudflare.com' | tail -1"
+fi
+
+echo ""
+echo "📋 Useful commands:"
+echo "  Check server status: ssh $PI_USER@$PI_HOST 'sudo systemctl status annas-mcp'"
+echo "  Check tunnel status: ssh $PI_USER@$PI_HOST 'sudo systemctl status cloudflared-tunnel'"
+echo "  View server logs: ssh $PI_USER@$PI_HOST 'sudo journalctl -u annas-mcp -f'"
+echo "  View tunnel logs: ssh $PI_USER@$PI_HOST 'sudo journalctl -u cloudflared-tunnel -f'"
+if [ "$TUNNEL_MODE" = "named" ]; then
+    echo "  Get tunnel hostname: ssh $PI_USER@$PI_HOST 'export CLOUDFLARE_API_TOKEN=\"${CLOUDFLARE_API_TOKEN}\" && /tmp/cloudflared tunnel info $TUNNEL_ID'"
+else
+    echo "  Get tunnel URL: ssh $PI_USER@$PI_HOST 'sudo journalctl -u cloudflared-tunnel -n 50 | grep trycloudflare.com'"
+fi
+
