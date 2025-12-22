@@ -19,9 +19,9 @@ import (
 
 // downloadTracker tracks recent downloads to prevent duplicates
 var (
-	downloadTracker     = make(map[string]time.Time)
-	downloadTrackerMu  sync.RWMutex
-	downloadCooldown    = 30 * time.Second // Prevent same hash download within 30 seconds
+	downloadTracker   = make(map[string]time.Time)
+	downloadTrackerMu sync.RWMutex
+	downloadCooldown  = 30 * time.Second // Prevent same hash download within 30 seconds
 )
 
 func SearchTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallToolParamsFor[SearchParams]) (*mcp.CallToolResultFor[any], error) {
@@ -40,9 +40,23 @@ func SearchTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTool
 		return nil, err
 	}
 
+	// Limit results to prevent huge responses that might timeout
+	maxResults := 30
+	if len(books) > maxResults {
+		books = books[:maxResults]
+		l.Info("Limited search results", zap.Int("totalFound", len(books)), zap.Int("returned", maxResults))
+	}
+
 	bookList := ""
-	for _, book := range books {
-		bookList += book.String() + "\n\n"
+	for i, book := range books {
+		bookList += book.String()
+		if i < len(books)-1 {
+			bookList += "\n\n"
+		}
+	}
+
+	if len(books) == 0 {
+		bookList = "No books found for your search term."
 	}
 
 	l.Info("Search command completed successfully",
@@ -60,38 +74,53 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 	l := logger.GetLogger()
 
 	hash := params.Arguments.BookHash
-	
-	// Check if this hash was recently downloaded to prevent duplicates
+
+	// Determine which Kindle email to use: provided or default (need this first for duplicate check)
+	kindleEmail := params.Arguments.KindleEmail
+	if kindleEmail == "" {
+		env, err := GetEnv()
+		if err == nil {
+			kindleEmail = env.KindleEmail
+		}
+	}
+
+	// Create a composite key for duplicate tracking: hash:kindle_email
+	// This allows the same book to be sent to different Kindles
+	trackerKey := hash + ":" + kindleEmail
+
+	// Check if this hash+kindle was recently downloaded to prevent duplicates
 	downloadTrackerMu.RLock()
-	lastDownload, recentlyDownloaded := downloadTracker[hash]
+	lastDownload, recentlyDownloaded := downloadTracker[trackerKey]
 	downloadTrackerMu.RUnlock()
-	
+
 	if recentlyDownloaded {
 		timeSinceLastDownload := time.Since(lastDownload)
 		if timeSinceLastDownload < downloadCooldown {
-			l.Info("Download request ignored - same hash downloaded recently",
+			l.Info("Download request ignored - same book recently sent to this Kindle",
 				zap.String("bookHash", hash),
+				zap.String("kindleEmail", kindleEmail),
 				zap.String("title", params.Arguments.Title),
 				zap.Duration("timeSinceLastDownload", timeSinceLastDownload),
 				zap.Duration("cooldown", downloadCooldown),
 			)
 			return &mcp.CallToolResultFor[any]{
 				Content: []mcp.Content{&mcp.TextContent{
-					Text: "Download skipped - this book was recently downloaded. Please wait a moment before trying again.",
+					Text: "Download skipped - this book was recently sent to this Kindle. Please wait a moment before trying again.",
 				}},
 			}, nil
 		}
 	}
-	
+
 	// Record this download attempt
 	downloadTrackerMu.Lock()
-	downloadTracker[hash] = time.Now()
+	downloadTracker[trackerKey] = time.Now()
 	downloadTrackerMu.Unlock()
 
 	l.Info("Download command called",
 		zap.String("bookHash", hash),
 		zap.String("title", params.Arguments.Title),
 		zap.String("format", params.Arguments.Format),
+		zap.String("kindleEmail", kindleEmail),
 	)
 
 	env, err := GetEnv()
@@ -111,7 +140,7 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 	}
 
 	// Try to email to Kindle first, fall back to regular download if email not configured
-	err = book.EmailToKindle(secretKey, env.SMTPHost, env.SMTPPort, env.SMTPUser, env.SMTPPassword, env.FromEmail, env.KindleEmail)
+	err = book.EmailToKindle(secretKey, env.SMTPHost, env.SMTPPort, env.SMTPUser, env.SMTPPassword, env.FromEmail, kindleEmail)
 	if err != nil {
 		// If email fails due to missing config, try regular download
 		if err.Error() == "email configuration incomplete: SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and FROM_EMAIL must be set" {
@@ -145,12 +174,12 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 
 	l.Info("Book sent to Kindle successfully",
 		zap.String("bookHash", params.Arguments.BookHash),
-		zap.String("kindleEmail", env.KindleEmail),
+		zap.String("kindleEmail", kindleEmail),
 	)
 
 	return &mcp.CallToolResultFor[any]{
 		Content: []mcp.Content{&mcp.TextContent{
-			Text: "Book sent to Kindle successfully at: " + env.KindleEmail,
+			Text: "Book sent to Kindle successfully at: " + kindleEmail,
 		}},
 	}, nil
 }
@@ -171,10 +200,11 @@ func StartMCPServer() {
 		mcp.NewServerTool("search", "Search for books on Anna's Archive. Returns a list of books with metadata including title, authors, format (epub, mobi, pdf, etc.), language, size, and MD5 hash. Use the hash from search results to download a specific book.", SearchTool, mcp.Input(
 			mcp.Property("term", mcp.Description("Search term - can be book title, author name, or any keywords")),
 		)),
-		mcp.NewServerTool("download", "Download a book and send it to Kindle email. The book is downloaded from Anna's Archive, saved locally as a backup (if ANNAS_DOWNLOAD_PATH is set), and then emailed to your Kindle email address. Requires ANNAS_SECRET_KEY for API access and email configuration (SMTP settings) for Kindle delivery. If email is not configured, falls back to local download only. Note: Kindle email only accepts PDF, EPUB, DOC, DOCX, HTML, RTF, and TXT formats - MOBI files will be rejected.", DownloadTool, mcp.Input(
+		mcp.NewServerTool("download", "Download a book and send it to a Kindle email. The book is downloaded from Anna's Archive, saved locally as a backup (if ANNAS_DOWNLOAD_PATH is set), and then emailed to the specified Kindle email address. If no kindle_email is provided, uses the default configured KINDLE_EMAIL. Requires ANNAS_SECRET_KEY for API access and email configuration (SMTP settings) for Kindle delivery. If email is not configured, falls back to local download only. Note: Kindle email only accepts PDF, EPUB, DOC, DOCX, HTML, RTF, and TXT formats - MOBI files will be rejected.", DownloadTool, mcp.Input(
 			mcp.Property("hash", mcp.Description("MD5 hash of the book to download - get this from the search results")),
 			mcp.Property("title", mcp.Description("Book title - used for the filename and email subject. Get this from search results.")),
 			mcp.Property("format", mcp.Description("Book format (epub, mobi, pdf, azw3, etc.) - get this from search results. The actual format will be detected from the downloaded file, but this helps with initial filename.")),
+			mcp.Property("kindle_email", mcp.Description("Optional: Kindle email address to send the book to. If not specified, uses the default KINDLE_EMAIL from server configuration.")),
 		)),
 	)
 
@@ -207,10 +237,11 @@ func StartMCPHTTPServer(port string) {
 		mcp.NewServerTool("search", "Search for books on Anna's Archive. Returns a list of books with metadata including title, authors, format (epub, mobi, pdf, etc.), language, size, and MD5 hash. Use the hash from search results to download a specific book.", SearchTool, mcp.Input(
 			mcp.Property("term", mcp.Description("Search term - can be book title, author name, or any keywords")),
 		)),
-		mcp.NewServerTool("download", "Download a book and send it to Kindle email. The book is downloaded from Anna's Archive, saved locally as a backup (if ANNAS_DOWNLOAD_PATH is set), and then emailed to your Kindle email address. Requires ANNAS_SECRET_KEY for API access and email configuration (SMTP settings) for Kindle delivery. If email is not configured, falls back to local download only. Note: Kindle email only accepts PDF, EPUB, DOC, DOCX, HTML, RTF, and TXT formats - MOBI files will be rejected.", DownloadTool, mcp.Input(
+		mcp.NewServerTool("download", "Download a book and send it to a Kindle email. The book is downloaded from Anna's Archive, saved locally as a backup (if ANNAS_DOWNLOAD_PATH is set), and then emailed to the specified Kindle email address. If no kindle_email is provided, uses the default configured KINDLE_EMAIL. Requires ANNAS_SECRET_KEY for API access and email configuration (SMTP settings) for Kindle delivery. If email is not configured, falls back to local download only. Note: Kindle email only accepts PDF, EPUB, DOC, DOCX, HTML, RTF, and TXT formats - MOBI files will be rejected.", DownloadTool, mcp.Input(
 			mcp.Property("hash", mcp.Description("MD5 hash of the book to download - get this from the search results")),
 			mcp.Property("title", mcp.Description("Book title - used for the filename and email subject. Get this from search results.")),
 			mcp.Property("format", mcp.Description("Book format (epub, mobi, pdf, azw3, etc.) - get this from search results. The actual format will be detected from the downloaded file, but this helps with initial filename.")),
+			mcp.Property("kindle_email", mcp.Description("Optional: Kindle email address to send the book to. If not specified, uses the default KINDLE_EMAIL from server configuration.")),
 		)),
 	)
 
@@ -242,6 +273,11 @@ func StartMCPHTTPServer(port string) {
 
 	// MCP protocol endpoint (JSON-RPC 2.0)
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
 		// Handle OPTIONS for CORS preflight
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
@@ -251,8 +287,8 @@ func StartMCPHTTPServer(port string) {
 		if r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"name":    "annas-mcp",
-				"version": serverVersion,
+				"name":     "annas-mcp",
+				"version":  serverVersion,
 				"protocol": "mcp",
 			})
 			return
@@ -337,6 +373,14 @@ func StartMCPHTTPServer(port string) {
 
 			l.Info("Initialize response", zap.Any("response", jsonRPCResp))
 
+		case "ping":
+			// Respond to MCP ping (JSON-RPC) with empty result per spec
+			jsonRPCResp = map[string]interface{}{
+				"jsonrpc": "2.0",
+				"id":      jsonRPCReq.ID,
+				"result":  map[string]interface{}{},
+			}
+
 		case "tools/list":
 			tools := []map[string]interface{}{
 				{
@@ -355,7 +399,7 @@ func StartMCPHTTPServer(port string) {
 				},
 				{
 					"name":        "download",
-					"description": "Download a book and send it to Kindle email. The book is downloaded from Anna's Archive, saved locally as a backup (if ANNAS_DOWNLOAD_PATH is set), and then emailed to your Kindle email address. Requires ANNAS_SECRET_KEY for API access and email configuration (SMTP settings) for Kindle delivery. If email is not configured, falls back to local download only. Note: Kindle email only accepts PDF, EPUB, DOC, DOCX, HTML, RTF, and TXT formats - MOBI files will be rejected.",
+					"description": "Download a book and send it to a Kindle email. The book is downloaded from Anna's Archive, saved locally as a backup (if ANNAS_DOWNLOAD_PATH is set), and then emailed to the specified Kindle email address. If no kindle_email is provided, uses the default configured KINDLE_EMAIL. Requires ANNAS_SECRET_KEY for API access and email configuration (SMTP settings) for Kindle delivery. If email is not configured, falls back to local download only. Note: Kindle email only accepts PDF, EPUB, DOC, DOCX, HTML, RTF, and TXT formats - MOBI files will be rejected.",
 					"inputSchema": map[string]interface{}{
 						"type": "object",
 						"properties": map[string]interface{}{
@@ -370,6 +414,10 @@ func StartMCPHTTPServer(port string) {
 							"format": map[string]interface{}{
 								"type":        "string",
 								"description": "Book format (epub, mobi, pdf, azw3, etc.) - get this from search results. The actual format will be detected from the downloaded file, but this helps with initial filename.",
+							},
+							"kindle_email": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: Kindle email address to send the book to. If not specified, uses the default KINDLE_EMAIL from server configuration.",
 							},
 						},
 						"required": []string{"hash", "title", "format"},
@@ -401,10 +449,14 @@ func StartMCPHTTPServer(port string) {
 
 			switch params.Name {
 			case "search":
-				term, ok := params.Arguments["term"].(string)
-				if !ok {
-					sendJSONRPCError(w, jsonRPCReq.ID, -32602, "Invalid params", "term must be a string")
-					return
+				// Handle both "term" and "query" parameter names (Le Chat uses "query")
+				var term string
+				var ok bool
+				if term, ok = params.Arguments["term"].(string); !ok {
+					if term, ok = params.Arguments["query"].(string); !ok {
+						sendJSONRPCError(w, jsonRPCReq.ID, -32602, "Invalid params", "term or query must be a string")
+						return
+					}
 				}
 				searchParams := &mcp.CallToolParamsFor[SearchParams]{
 					Arguments: SearchParams{SearchTerm: term},
@@ -415,15 +467,17 @@ func StartMCPHTTPServer(port string) {
 				hash, _ := params.Arguments["hash"].(string)
 				title, _ := params.Arguments["title"].(string)
 				format, _ := params.Arguments["format"].(string)
+				kindleEmail, _ := params.Arguments["kindle_email"].(string) // Optional
 				if hash == "" || title == "" || format == "" {
 					sendJSONRPCError(w, jsonRPCReq.ID, -32602, "Invalid params", "hash, title, and format are required")
 					return
 				}
 				downloadParams := &mcp.CallToolParamsFor[DownloadParams]{
 					Arguments: DownloadParams{
-						BookHash: hash,
-						Title:    title,
-						Format:   format,
+						BookHash:    hash,
+						Title:       title,
+						Format:      format,
+						KindleEmail: kindleEmail,
 					},
 				}
 				result, callErr = DownloadTool(ctx, nil, downloadParams)
@@ -434,6 +488,10 @@ func StartMCPHTTPServer(port string) {
 			}
 
 			if callErr != nil {
+				l.Error("Tool execution failed",
+					zap.String("tool", params.Name),
+					zap.Error(callErr),
+				)
 				sendJSONRPCError(w, jsonRPCReq.ID, -32000, "Tool execution error", callErr.Error())
 				return
 			}
@@ -448,6 +506,11 @@ func StartMCPHTTPServer(port string) {
 					})
 				}
 			}
+
+			l.Info("Tool execution successful",
+				zap.String("tool", params.Name),
+				zap.Int("contentItems", len(content)),
+			)
 
 			jsonRPCResp = map[string]interface{}{
 				"jsonrpc": "2.0",
@@ -473,6 +536,15 @@ func StartMCPHTTPServer(port string) {
 			"status":  "ok",
 			"name":    "annas-mcp",
 			"version": serverVersion,
+		})
+	})
+
+	// Ping endpoint for MCP validation/handshake checks
+	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status": "ok",
+			"name":   "annas-mcp",
 		})
 	})
 
@@ -516,9 +588,10 @@ func StartMCPHTTPServer(port string) {
 		}
 
 		var req struct {
-			Hash   string `json:"hash"`
-			Title  string `json:"title"`
-			Format string `json:"format"`
+			Hash        string `json:"hash"`
+			Title       string `json:"title"`
+			Format      string `json:"format"`
+			KindleEmail string `json:"kindle_email,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			l.Error("Failed to decode download request", zap.Error(err))
@@ -530,6 +603,7 @@ func StartMCPHTTPServer(port string) {
 			zap.String("hash", req.Hash),
 			zap.String("title", req.Title),
 			zap.String("format", req.Format),
+			zap.String("kindle_email", req.KindleEmail),
 		)
 
 		env, err := GetEnv()
@@ -539,6 +613,12 @@ func StartMCPHTTPServer(port string) {
 			return
 		}
 
+		// Use provided kindle_email or fall back to default
+		kindleEmail := req.KindleEmail
+		if kindleEmail == "" {
+			kindleEmail = env.KindleEmail
+		}
+
 		book := &anna.Book{
 			Hash:   req.Hash,
 			Title:  req.Title,
@@ -546,7 +626,7 @@ func StartMCPHTTPServer(port string) {
 		}
 
 		// Try to email to Kindle first, fall back to regular download if email not configured
-		err = book.EmailToKindle(env.SecretKey, env.SMTPHost, env.SMTPPort, env.SMTPUser, env.SMTPPassword, env.FromEmail, env.KindleEmail)
+		err = book.EmailToKindle(env.SecretKey, env.SMTPHost, env.SMTPPort, env.SMTPUser, env.SMTPPassword, env.FromEmail, kindleEmail)
 		if err != nil {
 			// If email fails due to missing config, try regular download
 			if err.Error() == "email configuration incomplete: SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and FROM_EMAIL must be set" {
@@ -573,7 +653,7 @@ func StartMCPHTTPServer(port string) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
 			"status":  "success",
-			"message": "Book sent to Kindle successfully at: " + env.KindleEmail,
+			"message": "Book sent to Kindle successfully at: " + kindleEmail,
 		})
 	})
 

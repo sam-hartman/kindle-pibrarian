@@ -19,3 +19,11 @@ AGENT_SYSTEM_PROMPT.md
 AGENT_SYSTEM_PROMPT.txt
 Pride and Prejudice.epub
 test-connector.sh
+
+# Setup scripts with sensitive tokens
+setup-permanent-tunnel.sh
+setup-tunnel-with-api.sh
+
+# Build artifacts
+annas-mcp-linux-arm
+push-to-new-repo.sh

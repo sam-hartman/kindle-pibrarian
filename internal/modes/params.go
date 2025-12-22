@@ -5,7 +5,8 @@ type SearchParams struct {
 }
 
 type DownloadParams struct {
-	BookHash string `json:"hash" mcp:"MD5 hash of the book to download"`
-	Title    string `json:"title" mcp:"Book title, used for filename"`
-	Format   string `json:"format" mcp:"Book format, for example pdf or epub"`
+	BookHash    string `json:"hash" mcp:"MD5 hash of the book to download"`
+	Title       string `json:"title" mcp:"Book title, used for filename"`
+	Format      string `json:"format" mcp:"Book format, for example pdf or epub"`
+	KindleEmail string `json:"kindle_email,omitempty" mcp:"Optional Kindle email to send the book to. If not specified, uses the default configured KINDLE_EMAIL."`
 }
