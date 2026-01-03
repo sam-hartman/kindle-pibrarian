@@ -507,6 +507,14 @@ func StartMCPHTTPServer(port string) {
 				}
 			}
 
+			// Include StructuredContent if available (e.g., Book structs from search)
+			resultMap := map[string]interface{}{
+				"content": content,
+			}
+			if result.StructuredContent != nil {
+				resultMap["structuredContent"] = result.StructuredContent
+			}
+
 			l.Info("Tool execution successful",
 				zap.String("tool", params.Name),
 				zap.Int("contentItems", len(content)),
@@ -515,9 +523,7 @@ func StartMCPHTTPServer(port string) {
 			jsonRPCResp = map[string]interface{}{
 				"jsonrpc": "2.0",
 				"id":      jsonRPCReq.ID,
-				"result": map[string]interface{}{
-					"content": content,
-				},
+				"result":  resultMap,
 			}
 
 		default:
