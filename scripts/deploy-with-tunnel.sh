@@ -9,7 +9,7 @@ PI_USER="pi"
 PI_PASS="test"
 PI_HOME="/home/pi"
 PROJECT_DIR="$PI_HOME/annas-mcp-server"
-CLOUDFLARE_API_TOKEN="iGhefDuggUpnE7VDMSdrSwi6oJrMelUgvlg6ylnJ"
+CLOUDFLARE_API_TOKEN="g_OsV75zb3bGHdhrjoRnVRTJVokNpve0O8KxG5mL"
 TUNNEL_NAME="annas-mcp"
 
 echo "🚀 Deploying Anna's Archive MCP Server to Raspberry Pi"
@@ -225,4 +225,5 @@ if [ "$TUNNEL_MODE" = "named" ]; then
 else
     echo "  Get tunnel URL: ssh $PI_USER@$PI_HOST 'sudo journalctl -u cloudflared-tunnel -n 50 | grep trycloudflare.com'"
 fi
+
 

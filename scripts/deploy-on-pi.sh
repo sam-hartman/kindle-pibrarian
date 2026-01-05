@@ -6,7 +6,7 @@ set -e
 
 PI_HOME="$HOME"
 PROJECT_DIR="$PI_HOME/annas-mcp-server"
-CLOUDFLARE_API_TOKEN="iGhefDuggUpnE7VDMSdrSwi6oJrMelUgvlg6ylnJ"
+CLOUDFLARE_API_TOKEN="g_OsV75zb3bGHdhrjoRnVRTJVokNpve0O8KxG5mL"
 TUNNEL_NAME="annas-mcp"
 
 echo "🚀 Deploying Anna's Archive MCP Server"
@@ -23,25 +23,50 @@ cd "$PI_HOME"
 if [ -d annas-mcp-server ]; then
     echo "Repository exists, pulling updates..."
     cd annas-mcp-server
-    git pull
+    git pull || echo "⚠️  Git pull failed, continuing with existing code..."
 else
     echo "Cloning repository..."
-    git clone https://github.com/sam-hartman-mistral/annas-mcp-server.git
+    # Try SSH first, then HTTPS
+    git clone git@github.com:sam-hartman-mistral/annas-mcp-server.git 2>/dev/null || \
+    git clone https://github.com/sam-hartman-mistral/annas-mcp-server.git 2>/dev/null || {
+        echo "⚠️  Git clone failed. If repo exists, continuing..."
+        mkdir -p annas-mcp-server
+    }
     cd annas-mcp-server
 fi
 
 echo ""
 echo "🔨 Step 2: Installing Go and building application..."
+# Check architecture
+ARCH=$(uname -m)
+echo "Detected architecture: $ARCH"
+
 # Check if Go is installed
 if ! command -v go >/dev/null 2>&1; then
     echo "Installing Go..."
-    wget -q https://go.dev/dl/go1.23.4.linux-armv6l.tar.gz
+    # Determine correct Go version based on architecture
+    if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+        GO_VERSION="go1.23.4.linux-arm64.tar.gz"
+    elif [ "$ARCH" = "armv7l" ] || [ "$ARCH" = "armv6l" ]; then
+        GO_VERSION="go1.23.4.linux-armv6l.tar.gz"
+    else
+        echo "⚠️  Unknown architecture, trying arm64..."
+        GO_VERSION="go1.23.4.linux-arm64.tar.gz"
+    fi
+    
+    echo "Downloading $GO_VERSION..."
+    wget -q "https://go.dev/dl/$GO_VERSION" -O /tmp/go.tar.gz
     sudo rm -rf /usr/local/go
-    sudo tar -C /usr/local -xzf go1.23.4.linux-armv6l.tar.gz
-    rm go1.23.4.linux-armv6l.tar.gz
+    sudo tar -C /usr/local -xzf /tmp/go.tar.gz
+    rm /tmp/go.tar.gz
     echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
     export PATH=$PATH:/usr/local/go/bin
+else
+    echo "Go is already installed: $(go version)"
 fi
+
+# Ensure Go is in PATH
+export PATH=$PATH:/usr/local/go/bin
 
 # Build the application
 cd "$PROJECT_DIR"
