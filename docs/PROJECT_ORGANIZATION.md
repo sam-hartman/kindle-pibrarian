@@ -9,43 +9,35 @@ This project follows a consistent file organization structure:
 
 All test scripts, diagnostic scripts, and test-related utilities should be placed in the `tests/` directory.
 
-Examples:
+**Current test scripts:**
 - Test scripts: `test-hash-response.sh`, `test-connector.sh`
 - Diagnostic scripts: `diagnose-pi.sh`
-- Deployment test scripts: `deploy-update.sh`
-
-### Documentation
-**Location:** `docs/` directory
-
-All project documentation, test results, troubleshooting guides, and related markdown files should be placed in the `docs/` directory.
-
-Examples:
-- Test results: `TEST_RESULTS.md`
-- Troubleshooting guides: `PI_TROUBLESHOOTING.md`
-- Project documentation: `PROJECT_ORGANIZATION.md`
+- Deployment test scripts: `deploy-update.sh`, `deploy-with-correct-user.sh`
 
 ### Shell Scripts
 **Location:** `scripts/` directory
 
 All shell scripts (.sh files) should be placed in the `scripts/` directory.
 
-Examples:
-- Deployment scripts: `deploy-on-pi.sh`, `deploy-with-tunnel.sh`, `deploy-to-pi.sh`
-- Setup scripts: `setup-email-env.sh`, `setup-new-repo.sh`, `raspberry-pi-setup.sh`
-- Utility scripts: `load-env.sh`, `start-http-server.sh`, `manage-tag.sh`
+**Core scripts:**
+- Deployment: `deploy-on-pi.sh`, `deploy-with-tunnel.sh`, `deploy-to-pi.sh`
+- Setup: `raspberry-pi-setup.sh`, `setup-email-env.sh`
+- Server: `start-http-server.sh`, `start-server-with-email.sh`
+
+**Note:** One-off utility scripts and scripts containing sensitive tokens have been removed to keep the repository clean.
 
 ### Documentation
 **Location:** `docs/` directory
 
-All project documentation, markdown files, and text files should be placed in the `docs/` directory.
+All project documentation and markdown files should be placed in the `docs/` directory.
 
 **Exception:** `README.md` stays in the project root (standard practice).
 
-Examples:
+**Current documentation:**
 - Setup guides: `KINDLE_EMAIL_SETUP.md`, `LE_CHAT_SETUP.md`
 - Documentation: `AGENT_SYSTEM_PROMPT.md`, `SECURITY_AUDIT.md`
 - Troubleshooting: `PI_TROUBLESHOOTING.md`
-- Test results: `TEST_RESULTS.md`
+- Organization: `PROJECT_ORGANIZATION.md` (this file)
 
 ## Standard Practice
 
