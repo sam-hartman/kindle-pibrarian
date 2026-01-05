@@ -64,9 +64,15 @@ func SearchTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTool
 		zap.Int("resultsCount", len(books)),
 	)
 
+	// Wrap books array in a dictionary for Le Chat compatibility
+	// Le Chat expects structuredContent to be a dict, not a list
+	structuredContent := map[string]interface{}{
+		"items": books,
+	}
+
 	return &mcp.CallToolResultFor[any]{
 		Content:           []mcp.Content{&mcp.TextContent{Text: bookList}},
-		StructuredContent: books,
+		StructuredContent: structuredContent,
 	}, nil
 }
 
