@@ -126,5 +126,5 @@ ssh pi@192.168.1.201
 ## Next Steps
 1. Fix network connectivity (most likely issue)
 2. Or deploy manually via USB
-3. Then test with: `./test-hash-response.sh`
+3. Then test with: `./tests/test-repo-comprehensive.sh` or `./tests/test-end-to-end.sh`
 

@@ -148,7 +148,7 @@ KINDLE_EMAIL=yourname_123@kindle.com  # Your Kindle email from Step 2
 **Option A: Using the convenience script (recommended)**
 
 ```bash
-./scripts/start-http-server.sh
+./scripts/start-server.sh
 ```
 
 **Option B: Direct command**
@@ -294,8 +294,7 @@ annas-mcp/
 │   ├── deploy-with-tunnel.sh   # Deploy with Cloudflare tunnel
 │   ├── raspberry-pi-setup.sh   # Systemd service configuration
 │   ├── setup-email-env.sh      # Email configuration helper
-│   ├── start-http-server.sh     # Start HTTP server
-│   └── start-server-with-email.sh  # Start server with email config
+│   └── start-server.sh          # Start HTTP server (auto-detects email config)
 │
 ├── docs/                         # Documentation
 │   ├── LE_CHAT_SETUP.md        # Mistral Le Chat setup guide
@@ -306,11 +305,9 @@ annas-mcp/
 │   └── AGENT_SYSTEM_PROMPT.md  # Agent system prompt
 │
 ├── tests/                        # Test scripts and utilities
-│   ├── test-hash-response.sh    # Test search hash response
-│   ├── test-connector.sh        # Test MCP connector
-│   ├── diagnose-pi.sh           # Pi connectivity diagnostics
-│   ├── deploy-update.sh         # Quick deployment script
-│   └── deploy-with-correct-user.sh  # Deployment with correct user
+│   ├── test-repo-comprehensive.sh  # Comprehensive test suite
+│   ├── test-end-to-end.sh       # End-to-end testing
+│   └── diagnose-pi.sh           # Pi connectivity diagnostics
 │
 ├── .env.example                  # Environment variable template
 ├── .gitignore                    # Git ignore rules

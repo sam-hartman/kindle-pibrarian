@@ -10,9 +10,8 @@ This project follows a consistent file organization structure:
 All test scripts, diagnostic scripts, and test-related utilities should be placed in the `tests/` directory.
 
 **Current test scripts:**
-- Test scripts: `test-hash-response.sh`, `test-connector.sh`
+- Test scripts: `test-repo-comprehensive.sh`, `test-end-to-end.sh`
 - Diagnostic scripts: `diagnose-pi.sh`
-- Deployment test scripts: `deploy-update.sh`, `deploy-with-correct-user.sh`
 
 ### Shell Scripts
 **Location:** `scripts/` directory
@@ -22,7 +21,7 @@ All shell scripts (.sh files) should be placed in the `scripts/` directory.
 **Core scripts:**
 - Deployment: `deploy-on-pi.sh`, `deploy-with-tunnel.sh`, `deploy-to-pi.sh`
 - Setup: `raspberry-pi-setup.sh`, `setup-email-env.sh`
-- Server: `start-http-server.sh`, `start-server-with-email.sh`
+- Server: `start-server.sh` (consolidated - auto-detects email config)
 
 **Note:** One-off utility scripts and scripts containing sensitive tokens have been removed to keep the repository clean.
 

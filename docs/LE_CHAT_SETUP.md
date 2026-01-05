@@ -26,7 +26,7 @@ cd "/Users/samuelhartman/annas mcp/annas-mcp"
 
 Or use the convenience script:
 ```bash
-./start-http-server.sh
+./scripts/start-server.sh
 ```
 
 The server will start on `http://localhost:8080`
