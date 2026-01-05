@@ -1,6 +1,6 @@
 # Anna's Archive MCP Server (and CLI Tool)
 
-[An MCP server](https://modelcontextprotocol.io/introduction) and CLI tool for searching and downloading documents from [Anna's Archive](https://annas-archive.org)
+[An MCP server](https://modelcontextprotocol.io/introduction) and CLI tool for searching and downloading documents from [Anna's Archive](https://annas-archive.se)
 
 ## ⚠️ Legal Disclaimer
 
@@ -37,10 +37,12 @@ The authors and contributors of this software:
 | Search Anna's Archive for documents matching specified terms                   | `search`   | `search`    |
 | Download a specific document that was previously returned by the `search` tool | `download` | `download`  |
 
+**Note:** The `download` tool supports an optional `kindle_email` parameter. If not provided, it uses the default `KINDLE_EMAIL` from your `.env` file.
+
 ## Requirements
 
-- [A donation to Anna's Archive](https://annas-archive.org/donate), which grants JSON API access
-- [An API key](https://annas-archive.org/faq#api)
+- [A donation to Anna's Archive](https://annas-archive.se/donate), which grants JSON API access
+- [An API key](https://annas-archive.se/faq#api)
 - Go 1.23+ (if building from source)
 
 For MCP server functionality, you also need an MCP client, such as:
@@ -59,10 +61,11 @@ go build -o annas-mcp ./cmd/annas-mcp
 
 ### 2. Configure
 
-Create a `.env` file from the template:
+Create a `.env` file (see `.env.example` for template):
 
 ```bash
-cp .env.example .env
+# Copy the example if it exists, or create manually
+cp .env.example .env 2>/dev/null || touch .env
 ```
 
 Edit `.env` and fill in your values:
@@ -145,7 +148,7 @@ KINDLE_EMAIL=yourname_123@kindle.com  # Your Kindle email from Step 2
 **Option A: Using the convenience script (recommended)**
 
 ```bash
-./start-http-server.sh
+./scripts/start-http-server.sh
 ```
 
 **Option B: Direct command**
@@ -160,13 +163,14 @@ The server will start on `http://localhost:8080`
 
 #### For Mistral Le Chat
 
-See [LE_CHAT_SETUP.md](LE_CHAT_SETUP.md) for detailed instructions.
+See [docs/LE_CHAT_SETUP.md](docs/LE_CHAT_SETUP.md) for detailed instructions.
 
 Quick setup:
 1. Open Le Chat → Intelligence → Connectors
 2. Add Custom MCP Connector
 3. Set **Connector Server** to: `http://localhost:8080/mcp`
-4. Click Connect
+4. Set **Authentication Method** to "None" (or "API Token" if required)
+5. Click Create
 
 #### For Claude Desktop
 
@@ -193,10 +197,15 @@ Add to your MCP configuration file:
 
 The server exposes these endpoints:
 
-- `GET /health` - Health check
-- `POST /search` - Search for books
-- `POST /download` - Download a book
-- `POST /mcp` - MCP protocol endpoint (for MCP clients)
+- `GET /` - Server info and discovery
+- `GET /mcp` - MCP protocol discovery
+- `POST /mcp` - MCP protocol endpoint (JSON-RPC 2.0)
+  - `initialize` - Initialize MCP connection
+  - `ping` - Health check
+  - `tools/list` - List available tools
+  - `tools/call` - Execute a tool (search or download)
+- `POST /search` - Direct search endpoint (legacy)
+- `POST /download` - Direct download endpoint (legacy)
 
 ### As a CLI Tool
 
@@ -210,14 +219,69 @@ The server exposes these endpoints:
 
 ## Features
 
-- 🔍 Search Anna's Archive for books and documents
-- 📥 Download books directly to your device
-- 📧 **Email books directly to your Kindle** (see [KINDLE_EMAIL_SETUP.md](KINDLE_EMAIL_SETUP.md))
-- 🔌 MCP server support for AI assistants
-- 🌐 HTTP server mode for web-based clients
-- 🔒 Secure configuration via `.env` file
+- 🔍 **Search Anna's Archive** for books and documents with structured results
+- 📥 **Download books** directly to your device or send to Kindle
+- 📧 **Email books directly to your Kindle** with optional per-request email address
+- 🔌 **MCP server support** for AI assistants (Claude Desktop, Mistral Le Chat)
+- 🌐 **HTTP server mode** for web-based clients
+- 📊 **Structured content** - Search results include book metadata in JSON format
+- 🔒 **Secure configuration** via `.env` file
+- 🛡️ **Duplicate protection** - Prevents sending the same book to the same Kindle multiple times
+
+## MCP Tools
+
+### `search`
+Search for books on Anna's Archive. Returns a list of books with metadata including:
+- Title, authors, publisher
+- Format (epub, mobi, pdf, etc.)
+- Language, size
+- **MD5 hash** (required for download)
+
+**Response includes:**
+- Text content with formatted book list
+- `structuredContent` field with JSON array of book objects (wrapped in `{"items": [...]}` for Le Chat compatibility)
+
+### `download`
+Download a book and send it to a Kindle email address.
+
+**Parameters:**
+- `hash` (required) - MD5 hash from search results
+- `title` (required) - Book title
+- `format` (required) - Book format (epub, mobi, pdf, etc.)
+- `kindle_email` (optional) - Kindle email address. If not provided, uses `KINDLE_EMAIL` from `.env`
+
+**Behavior:**
+- Downloads book from Anna's Archive
+- Saves locally as backup (if `ANNAS_DOWNLOAD_PATH` is set)
+- Emails to specified Kindle email (or default if not specified)
+- Falls back to local download only if email is not configured
 
 ## Documentation
 
-- [LE_CHAT_SETUP.md](LE_CHAT_SETUP.md) - Setup guide for Mistral Le Chat
-- [KINDLE_EMAIL_SETUP.md](KINDLE_EMAIL_SETUP.md) - Guide for emailing books to Kindle
+- [docs/LE_CHAT_SETUP.md](docs/LE_CHAT_SETUP.md) - Setup guide for Mistral Le Chat
+- [docs/KINDLE_EMAIL_SETUP.md](docs/KINDLE_EMAIL_SETUP.md) - Guide for emailing books to Kindle
+- [docs/PROJECT_ORGANIZATION.md](docs/PROJECT_ORGANIZATION.md) - Project structure and organization standards
+- [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md) - Security considerations
+
+## Project Structure
+
+```
+annas-mcp/
+├── cmd/              # Application entry points
+├── internal/         # Internal packages
+│   ├── anna/        # Anna's Archive integration
+│   ├── logger/      # Logging utilities
+│   ├── modes/       # MCP server and CLI modes
+│   └── version/     # Version information
+├── scripts/          # Shell scripts (deployment, setup, etc.)
+├── docs/             # Documentation files
+├── tests/            # Test scripts and utilities
+└── README.md         # This file
+```
+
+## Deployment
+
+For deployment scripts and setup guides, see:
+- `scripts/deploy-on-pi.sh` - Deploy directly on Raspberry Pi
+- `scripts/deploy-with-tunnel.sh` - Deploy with Cloudflare tunnel from Mac
+- `scripts/raspberry-pi-setup.sh` - Systemd service setup
