@@ -27,3 +27,8 @@ setup-tunnel-with-api.sh
 # Build artifacts
 annas-mcp-linux-arm
 push-to-new-repo.sh
+
+# Temporary tunnel files
+.tunnel-url
+AUTOMATED_URL_SOLUTION.md
+QUICK_START.md

@@ -54,7 +54,7 @@ func SearchTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTool
 			bookList += "\n\n"
 		}
 	}
-
+	
 	if len(books) == 0 {
 		bookList = "No books found for your search term."
 	}
@@ -80,7 +80,7 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 	l := logger.GetLogger()
 
 	hash := params.Arguments.BookHash
-
+	
 	// Determine which Kindle email to use: provided or default (need this first for duplicate check)
 	kindleEmail := params.Arguments.KindleEmail
 	if kindleEmail == "" {
@@ -98,7 +98,7 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 	downloadTrackerMu.RLock()
 	lastDownload, recentlyDownloaded := downloadTracker[trackerKey]
 	downloadTrackerMu.RUnlock()
-
+	
 	if recentlyDownloaded {
 		timeSinceLastDownload := time.Since(lastDownload)
 		if timeSinceLastDownload < downloadCooldown {
@@ -116,7 +116,7 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 			}, nil
 		}
 	}
-
+	
 	// Record this download attempt
 	downloadTrackerMu.Lock()
 	downloadTracker[trackerKey] = time.Now()
@@ -283,7 +283,7 @@ func StartMCPHTTPServer(port string) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
+		
 		// Handle OPTIONS for CORS preflight
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
@@ -494,7 +494,7 @@ func StartMCPHTTPServer(port string) {
 			}
 
 			if callErr != nil {
-				l.Error("Tool execution failed",
+				l.Error("Tool execution failed", 
 					zap.String("tool", params.Name),
 					zap.Error(callErr),
 				)

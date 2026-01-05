@@ -94,7 +94,7 @@ if [ -f "$PROJECT_DIR/.env" ]; then
 else
     echo "⚠️  .env file not found. Creating template..."
     echo "   Please edit $PROJECT_DIR/.env with your actual values!"
-    cat > "$PROJECT_DIR/.env" << 'ENVEOF'
+cat > "$PROJECT_DIR/.env" << 'ENVEOF'
 # Anna's Archive MCP Configuration
 # Edit these values with your actual credentials
 
