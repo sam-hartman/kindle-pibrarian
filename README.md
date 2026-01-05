@@ -265,19 +265,87 @@ Download a book and send it to a Kindle email address.
 
 ## Project Structure
 
+### File Structure
+
 ```
 annas-mcp/
-├── cmd/              # Application entry points
-├── internal/         # Internal packages
-│   ├── anna/        # Anna's Archive integration
-│   ├── logger/      # Logging utilities
-│   ├── modes/       # MCP server and CLI modes
-│   └── version/     # Version information
-├── scripts/          # Shell scripts (deployment, setup, etc.)
-├── docs/             # Documentation files
-├── tests/            # Test scripts and utilities
-└── README.md         # This file
+├── cmd/
+│   └── annas-mcp/
+│       └── main.go              # Application entry point
+│
+├── internal/                     # Internal packages (not exported)
+│   ├── anna/                    # Anna's Archive API integration
+│   │   ├── anna.go             # Search, download, email functionality
+│   │   └── structs.go          # Book and API response structs
+│   ├── logger/                  # Logging utilities
+│   │   └── logger.go           # Structured logging setup
+│   ├── modes/                   # Application modes (MCP, CLI, HTTP)
+│   │   ├── mcpserver.go        # MCP server implementation
+│   │   ├── cli.go              # CLI command handlers
+│   │   ├── env.go              # Environment variable loading
+│   │   └── params.go           # Tool parameter definitions
+│   └── version/                 # Version management
+│       ├── version.go          # Version retrieval
+│       └── version.txt         # Version string
+│
+├── scripts/                      # Deployment and utility scripts
+│   ├── deploy-on-pi.sh         # Deploy directly on Raspberry Pi
+│   ├── deploy-to-pi.sh         # Deploy from Mac to Pi
+│   ├── deploy-with-tunnel.sh   # Deploy with Cloudflare tunnel
+│   ├── raspberry-pi-setup.sh   # Systemd service configuration
+│   ├── setup-email-env.sh      # Email configuration helper
+│   ├── start-http-server.sh     # Start HTTP server
+│   └── start-server-with-email.sh  # Start server with email config
+│
+├── docs/                         # Documentation
+│   ├── LE_CHAT_SETUP.md        # Mistral Le Chat setup guide
+│   ├── KINDLE_EMAIL_SETUP.md   # Kindle email configuration
+│   ├── PI_TROUBLESHOOTING.md   # Raspberry Pi troubleshooting
+│   ├── PROJECT_ORGANIZATION.md # File organization standards
+│   ├── SECURITY_AUDIT.md       # Security considerations
+│   └── AGENT_SYSTEM_PROMPT.md  # Agent system prompt
+│
+├── tests/                        # Test scripts and utilities
+│   ├── test-hash-response.sh    # Test search hash response
+│   ├── test-connector.sh        # Test MCP connector
+│   ├── diagnose-pi.sh           # Pi connectivity diagnostics
+│   ├── deploy-update.sh         # Quick deployment script
+│   └── deploy-with-correct-user.sh  # Deployment with correct user
+│
+├── .env.example                  # Environment variable template
+├── .gitignore                    # Git ignore rules
+├── go.mod                        # Go module definition
+├── go.sum                        # Go module checksums
+└── README.md                     # This file
 ```
+
+### Code Structure
+
+**Entry Point** (`cmd/annas-mcp/main.go`):
+- Parses command-line arguments
+- Routes to appropriate mode (MCP, CLI, HTTP)
+
+**Core Packages**:
+
+- **`internal/anna/`** - Anna's Archive integration
+  - `FindBook()` - Web scraping search functionality
+  - `Download()` - Download books via API
+  - `EmailToKindle()` - Email books to Kindle devices
+
+- **`internal/modes/`** - Application modes
+  - `StartMCPServer()` - MCP protocol server (stdio)
+  - `StartMCPHTTPServer()` - HTTP-based MCP server
+  - `SearchTool()` - MCP search tool implementation
+  - `DownloadTool()` - MCP download tool implementation
+
+- **`internal/logger/`** - Structured logging with zap
+
+- **`internal/version/`** - Version management
+
+**Data Flow**:
+1. MCP client → `mcpserver.go` → `SearchTool()` → `anna.FindBook()`
+2. Search results → `structuredContent` (wrapped in `{"items": [...]}`)
+3. Download request → `DownloadTool()` → `anna.EmailToKindle()` or `anna.Download()`
 
 ## Deployment
 
