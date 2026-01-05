@@ -2,6 +2,7 @@ package anna
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"net/url"
@@ -14,16 +15,17 @@ import (
 	"net/smtp"
 	"os"
 	"path/filepath"
+	"time"
 
-	colly "github.com/gocolly/colly/v2"
 	"github.com/PuerkitoBio/goquery"
+	colly "github.com/gocolly/colly/v2"
 	"github.com/iosifache/annas-mcp/internal/logger"
 	"go.uber.org/zap"
 )
 
 const (
-	AnnasSearchEndpoint   = "https://annas-archive.org/search?q=%s"
-	AnnasDownloadEndpoint = "https://annas-archive.org/dyn/api/fast_download.json?md5=%s&key=%s"
+	AnnasSearchEndpoint   = "https://annas-archive.se/search?q=%s"
+	AnnasDownloadEndpoint = "https://annas-archive.se/dyn/api/fast_download.json?md5=%s&key=%s"
 )
 
 // sanitizeFilename creates a safe filename by replacing problematic characters
@@ -116,7 +118,7 @@ func extractMetaInformation(meta string) (language, format, size string) {
 	if meta == "" {
 		return "", "", ""
 	}
-	
+
 	// Try splitting by comma first (common format: "English, epub, 2.5 MB")
 	parts := strings.Split(meta, ", ")
 	if len(parts) >= 2 {
@@ -124,7 +126,7 @@ func extractMetaInformation(meta string) (language, format, size string) {
 		potentialLang := strings.TrimSpace(parts[0])
 		// Check if it looks like a language name
 		languageKeywords := map[string]string{
-			"english": "English", "spanish": "Spanish", "french": "French", 
+			"english": "English", "spanish": "Spanish", "french": "French",
 			"german": "German", "italian": "Italian", "portuguese": "Portuguese",
 			"russian": "Russian", "chinese": "Chinese", "japanese": "Japanese",
 			"korean": "Korean", "arabic": "Arabic", "dutch": "Dutch",
@@ -139,29 +141,29 @@ func extractMetaInformation(meta string) (language, format, size string) {
 			// Might be a language name even if not in our map
 			language = potentialLang
 		}
-		
+
 		// Look for format in the parts
 		for _, part := range parts {
 			partLower := strings.ToLower(strings.TrimSpace(part))
-			if partLower == "epub" || partLower == "pdf" || partLower == "mobi" || 
-			   partLower == "azw" || partLower == "azw3" || partLower == "zip" {
+			if partLower == "epub" || partLower == "pdf" || partLower == "mobi" ||
+				partLower == "azw" || partLower == "azw3" || partLower == "zip" {
 				format = partLower
 				break
 			}
 		}
-		
+
 		// Look for size (contains MB, KB, GB, or bytes)
 		for _, part := range parts {
 			partLower := strings.ToLower(strings.TrimSpace(part))
-			if strings.Contains(partLower, "mb") || strings.Contains(partLower, "kb") || 
-			   strings.Contains(partLower, "gb") || strings.Contains(partLower, "bytes") ||
-			   strings.Contains(partLower, "byte") {
+			if strings.Contains(partLower, "mb") || strings.Contains(partLower, "kb") ||
+				strings.Contains(partLower, "gb") || strings.Contains(partLower, "bytes") ||
+				strings.Contains(partLower, "byte") {
 				size = strings.TrimSpace(part)
 				break
 			}
 		}
 	}
-	
+
 	// If format not found in comma-separated parts, search the whole string
 	if format == "" {
 		metaLower := strings.ToLower(meta)
@@ -177,15 +179,15 @@ func extractMetaInformation(meta string) (language, format, size string) {
 			format = "azw"
 		}
 	}
-	
+
 	// If size not found, search the whole string for size patterns
 	if size == "" {
 		// Look for patterns like "2.5 MB", "500 KB", "1.2 GB", etc.
 		words := strings.Fields(meta)
 		for i, word := range words {
 			wordLower := strings.ToLower(word)
-			if (strings.Contains(wordLower, "mb") || strings.Contains(wordLower, "kb") || 
-				strings.Contains(wordLower, "gb") || strings.Contains(wordLower, "bytes")) {
+			if strings.Contains(wordLower, "mb") || strings.Contains(wordLower, "kb") ||
+				strings.Contains(wordLower, "gb") || strings.Contains(wordLower, "bytes") {
 				// Try to get the number before it
 				if i > 0 {
 					size = strings.TrimSpace(words[i-1] + " " + word)
@@ -207,13 +209,33 @@ func FindBook(query string) ([]*Book, error) {
 		colly.Async(true),
 	)
 
+	// Configure HTTP client with TLS support
+	// Using more compatible TLS settings
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+			ServerName:         "annas-archive.se", // Updated to new domain
+		},
+		DisableCompression: false,
+		ForceAttemptHTTP2:  false, // Use HTTP/1.1
+	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+	}
+	c.SetClient(client)
+
+	// Set user agent to avoid being blocked
+	c.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 	bookList := make([]*colly.HTMLElement, 0)
 
 	// Look for book entries - Anna's Archive uses specific structures
 	c.OnHTML("a[href^='/md5/']", func(e *colly.HTMLElement) {
 		bookList = append(bookList, e)
+		l.Debug("Found book link", zap.String("href", e.Attr("href")))
 	})
-	
+
 	// Also try to find book cards/items directly
 	c.OnHTML("[class*='book'], [class*='item'], [class*='result']", func(e *colly.HTMLElement) {
 		link := e.DOM.Find("a[href^='/md5/']").First()
@@ -222,8 +244,8 @@ func FindBook(query string) ([]*Book, error) {
 			if href != "" {
 				// Create a temporary element for this book
 				tempE := &colly.HTMLElement{
-					DOM: link,
-					Request: e.Request,
+					DOM:      link,
+					Request:  e.Request,
 					Response: e.Response,
 				}
 				bookList = append(bookList, tempE)
@@ -233,11 +255,24 @@ func FindBook(query string) ([]*Book, error) {
 
 	c.OnRequest(func(r *colly.Request) {
 		l.Info("Visiting URL", zap.String("url", r.URL.String()))
+		r.Headers.Set("User-Agent", c.UserAgent)
+		r.Headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+		r.Headers.Set("Accept-Language", "en-US,en;q=0.5")
+	})
+
+	c.OnError(func(r *colly.Response, err error) {
+		l.Error("Request failed", zap.String("url", r.Request.URL.String()), zap.Error(err))
+	})
+
+	c.OnResponse(func(r *colly.Response) {
+		l.Info("Received response", zap.String("url", r.Request.URL.String()), zap.Int("status", r.StatusCode), zap.Int("size", len(r.Body)))
 	})
 
 	fullURL := fmt.Sprintf(AnnasSearchEndpoint, url.QueryEscape(query))
+	l.Info("Starting search", zap.String("query", query), zap.String("url", fullURL))
 	c.Visit(fullURL)
 	c.Wait()
+	l.Info("Search completed", zap.Int("linksFound", len(bookList)))
 
 	bookListParsed := make([]*Book, 0)
 	seenHashes := make(map[string]bool)
@@ -245,7 +280,7 @@ func FindBook(query string) ([]*Book, error) {
 	for _, e := range bookList {
 		link := e.Attr("href")
 		hash := strings.TrimPrefix(link, "/md5/")
-		
+
 		// Skip duplicates
 		if seenHashes[hash] {
 			continue
@@ -292,12 +327,12 @@ func FindBook(query string) ([]*Book, error) {
 				}
 			}
 		}
-		
+
 		// Clean up title - remove file paths and extract just the book title
 		if title != "" {
 			// Remove common file path patterns
 			title = strings.TrimSpace(title)
-			
+
 			// Remove leading path components (e.g., "lgli/", "upload/", etc.)
 			// Try multiple times to remove nested paths
 			for i := 0; i < 5; i++ {
@@ -313,10 +348,10 @@ func FindBook(query string) ([]*Book, error) {
 					break
 				}
 			}
-			
+
 			// Remove backslashes (Windows paths) and replace with spaces
 			title = strings.ReplaceAll(title, "\\", " ")
-			
+
 			// Remove common path prefixes that might remain
 			pathPrefixes := []string{"lgli/", "upload/", "nexusstc/", "!!1", "!!"}
 			for _, prefix := range pathPrefixes {
@@ -325,7 +360,7 @@ func FindBook(query string) ([]*Book, error) {
 					title = strings.TrimSpace(title)
 				}
 			}
-			
+
 			// Remove file extensions from the end if they're part of the title
 			extensions := []string{".epub", ".mobi", ".pdf", ".azw3", ".zip", ".nodrm"}
 			for _, ext := range extensions {
@@ -335,18 +370,18 @@ func FindBook(query string) ([]*Book, error) {
 					break
 				}
 			}
-			
+
 			// Remove underscores and replace with spaces
 			title = strings.ReplaceAll(title, "_", " ")
-			
+
 			// Clean up multiple spaces and special characters
 			title = strings.Join(strings.Fields(title), " ")
-			
+
 			// Take only the first line if there are multiple lines
 			if idx := strings.Index(title, "\n"); idx > 0 {
 				title = strings.TrimSpace(title[:idx])
 			}
-			
+
 			// Final cleanup: remove any remaining path-like patterns at the start
 			title = strings.TrimSpace(title)
 			if strings.Contains(title, ":") && strings.Index(title, ":") < 3 {
@@ -360,15 +395,15 @@ func FindBook(query string) ([]*Book, error) {
 		// Extract metadata - look for text containing format/language/size info
 		var metaText, authorsText, publisherText string
 		containerText := strings.ToLower(container.Text())
-		
+
 		// Look for format indicators in the container text
-		if strings.Contains(containerText, "epub") || strings.Contains(containerText, "pdf") || 
-		   strings.Contains(containerText, "mobi") || strings.Contains(containerText, "azw") {
+		if strings.Contains(containerText, "epub") || strings.Contains(containerText, "pdf") ||
+			strings.Contains(containerText, "mobi") || strings.Contains(containerText, "azw") {
 			// Find the div/span that contains this info
 			container.Find("div, span").Each(func(i int, s *goquery.Selection) {
 				text := strings.ToLower(strings.TrimSpace(s.Text()))
 				// Look for metadata strings that contain format, language, or size info
-				if (strings.Contains(text, "epub") || strings.Contains(text, "pdf") || 
+				if (strings.Contains(text, "epub") || strings.Contains(text, "pdf") ||
 					strings.Contains(text, "mobi") || strings.Contains(text, "azw") ||
 					strings.Contains(text, "english") || strings.Contains(text, "spanish") ||
 					strings.Contains(text, "french") || strings.Contains(text, "german") ||
@@ -382,9 +417,9 @@ func FindBook(query string) ([]*Book, error) {
 				}
 			})
 		}
-		
+
 		// Also look for language indicators more broadly
-		languageKeywords := []string{"english", "spanish", "french", "german", "italian", "portuguese", 
+		languageKeywords := []string{"english", "spanish", "french", "german", "italian", "portuguese",
 			"russian", "chinese", "japanese", "korean", "arabic", "dutch", "polish", "turkish"}
 		if metaText == "" {
 			for _, lang := range languageKeywords {
@@ -401,19 +436,19 @@ func FindBook(query string) ([]*Book, error) {
 				}
 			}
 		}
-		
+
 		// Try to extract authors - look for text that might be author names
 		// Authors are often in a separate div or after the title
 		container.Find("div, span, p").Each(func(i int, s *goquery.Selection) {
 			text := strings.TrimSpace(s.Text())
 			// Heuristic: reasonable length, not a URL, not size info, not the title
-			if text != "" && len(text) > 2 && len(text) < 300 && 
-			   !strings.HasPrefix(text, "http") && 
-			   !strings.Contains(strings.ToLower(text), "mb") && 
-			   !strings.Contains(strings.ToLower(text), "kb") &&
-			   text != title &&
-			   !strings.Contains(strings.ToLower(text), "download") &&
-			   !strings.Contains(strings.ToLower(text), "view") {
+			if text != "" && len(text) > 2 && len(text) < 300 &&
+				!strings.HasPrefix(text, "http") &&
+				!strings.Contains(strings.ToLower(text), "mb") &&
+				!strings.Contains(strings.ToLower(text), "kb") &&
+				text != title &&
+				!strings.Contains(strings.ToLower(text), "download") &&
+				!strings.Contains(strings.ToLower(text), "view") {
 				// Check if it looks like an author name (has capital letters, not all caps)
 				hasUpper := false
 				allUpper := true
@@ -433,7 +468,7 @@ func FindBook(query string) ([]*Book, error) {
 
 		// Parse metadata
 		language, format, size := extractMetaInformation(metaText)
-		
+
 		// If format not found in meta, try to extract from URL or other sources
 		if format == "" {
 			// Check if title or other text contains format info
@@ -455,8 +490,8 @@ func FindBook(query string) ([]*Book, error) {
 			formatTrimmed = strings.TrimPrefix(formatTrimmed, "-")
 			formatTrimmed = strings.TrimPrefix(formatTrimmed, ":")
 			// Remove first character if it's not alphanumeric
-			if len(formatTrimmed) > 1 && !((formatTrimmed[0] >= 'a' && formatTrimmed[0] <= 'z') || 
-				(formatTrimmed[0] >= 'A' && formatTrimmed[0] <= 'Z') || 
+			if len(formatTrimmed) > 1 && !((formatTrimmed[0] >= 'a' && formatTrimmed[0] <= 'z') ||
+				(formatTrimmed[0] >= 'A' && formatTrimmed[0] <= 'Z') ||
 				(formatTrimmed[0] >= '0' && formatTrimmed[0] <= '9')) {
 				formatTrimmed = formatTrimmed[1:]
 			}
@@ -490,7 +525,7 @@ func (b *Book) Download(secretKey, folderPath string) error {
 		zap.String("format", b.Format),
 		zap.String("folderPath", folderPath),
 	)
-	
+
 	apiURL := fmt.Sprintf(AnnasDownloadEndpoint, b.Hash, secretKey)
 
 	resp, err := http.Get(apiURL)
@@ -503,7 +538,7 @@ func (b *Book) Download(secretKey, folderPath string) error {
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return fmt.Errorf("failed to decode API response: %w", err)
 	}
-	
+
 	// Check HTTP status code first
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		if apiResp.Error != "" {
@@ -511,7 +546,7 @@ func (b *Book) Download(secretKey, folderPath string) error {
 		}
 		return fmt.Errorf("API request failed with status code: %d", resp.StatusCode)
 	}
-	
+
 	if apiResp.DownloadURL == "" {
 		if apiResp.Error != "" {
 			return fmt.Errorf("Anna's Archive API error: %s (this usually means the book hash is invalid or the book doesn't exist)", apiResp.Error)
@@ -538,7 +573,7 @@ func (b *Book) Download(secretKey, folderPath string) error {
 	// Detect actual file format from Content-Type and file content
 	contentType := downloadResp.Header.Get("Content-Type")
 	actualFormat, _ := detectFileFormat(contentType, fileData)
-	
+
 	// Use detected format if available, otherwise fall back to search result format
 	format := actualFormat
 	if format == "unknown" {
@@ -547,7 +582,7 @@ func (b *Book) Download(secretKey, folderPath string) error {
 
 	filename := sanitizeFilename(b.Title) + "." + format
 	filePath := filepath.Join(folderPath, filename)
-	
+
 	// Check if file already exists to avoid duplicates
 	if _, err := os.Stat(filePath); err == nil {
 		logger.GetLogger().Info("File already exists, skipping save",
@@ -566,7 +601,7 @@ func (b *Book) Download(secretKey, folderPath string) error {
 // EmailToKindle sends the book file to the Kindle email address
 func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPassword, fromEmail, kindleEmail string) error {
 	l := logger.GetLogger()
-	
+
 	l.Info("EmailToKindle function called",
 		zap.String("hash", b.Hash),
 		zap.String("title", b.Title),
@@ -593,7 +628,7 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return fmt.Errorf("failed to decode API response: %w", err)
 	}
-	
+
 	// Check HTTP status code first
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		if apiResp.Error != "" {
@@ -601,7 +636,7 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 		}
 		return fmt.Errorf("API request failed with status code: %d", resp.StatusCode)
 	}
-	
+
 	if apiResp.DownloadURL == "" {
 		if apiResp.Error != "" {
 			return fmt.Errorf("Anna's Archive API error: %s (this usually means the book hash is invalid or the book doesn't exist)", apiResp.Error)
@@ -628,7 +663,7 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 	// Detect actual file format from Content-Type and file content
 	contentType := downloadResp.Header.Get("Content-Type")
 	actualFormat, detectedMimeType := detectFileFormat(contentType, fileData)
-	
+
 	// Save to disk as backup (optional, uses ANNAS_DOWNLOAD_PATH if set)
 	// This allows you to have a local copy even when emailing
 	if downloadPath := os.Getenv("ANNAS_DOWNLOAD_PATH"); downloadPath != "" {
@@ -638,12 +673,12 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 		}
 		filename := sanitizeFilename(b.Title) + "." + format
 		filePath := filepath.Join(downloadPath, filename)
-		
+
 		l.Info("Checking if file already exists before saving",
 			zap.String("path", filePath),
 			zap.String("hash", b.Hash),
 		)
-		
+
 		// Check if file already exists to avoid duplicates
 		if _, err := os.Stat(filePath); err == nil {
 			l.Info("File already exists, skipping save to prevent duplicate",
@@ -658,7 +693,7 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 			)
 			if err := os.WriteFile(filePath, fileData, 0644); err != nil {
 				// Log but don't fail if we can't save to disk
-				l.Warn("Failed to save file to disk as backup", 
+				l.Warn("Failed to save file to disk as backup",
 					zap.String("path", filePath),
 					zap.Error(err),
 				)
@@ -674,7 +709,7 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 			zap.String("hash", b.Hash),
 		)
 	}
-	
+
 	// Use detected format if available, otherwise fall back to search result format
 	format := actualFormat
 	if format == "unknown" {
@@ -724,19 +759,19 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 	emailBody.WriteString(fmt.Sprintf("Subject: %s\r\n", filename))
 	emailBody.WriteString("MIME-Version: 1.0\r\n")
 	emailBody.WriteString(fmt.Sprintf("Content-Type: multipart/mixed; boundary=boundary123\r\n\r\n"))
-	
+
 	// Email body
 	emailBody.WriteString("--boundary123\r\n")
 	emailBody.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
 	emailBody.WriteString(fmt.Sprintf("Book: %s\r\n", b.Title))
 	emailBody.WriteString("\r\n")
-	
+
 	// Attachment
 	emailBody.WriteString("--boundary123\r\n")
 	emailBody.WriteString(fmt.Sprintf("Content-Type: %s; name=\"%s\"\r\n", mimeType, filename))
 	emailBody.WriteString("Content-Transfer-Encoding: base64\r\n")
 	emailBody.WriteString(fmt.Sprintf("Content-Disposition: attachment; filename=\"%s\"\r\n\r\n", filename))
-	
+
 	// Encode file as base64
 	encoded := base64.StdEncoding.EncodeToString(fileData)
 	// Split into lines of 76 characters (RFC 2045)
@@ -747,7 +782,7 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 		}
 		emailBody.WriteString(encoded[i:end] + "\r\n")
 	}
-	
+
 	emailBody.WriteString("\r\n--boundary123--\r\n")
 
 	// Send email via SMTP
