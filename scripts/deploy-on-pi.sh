@@ -1,13 +1,24 @@
 #!/bin/bash
 # Deployment script to run directly on Raspberry Pi
 # SSH into your Pi and run: bash deploy-on-pi.sh
+#
+# This script loads sensitive values from .env file if it exists.
+# If .env doesn't exist, it will create a template that you must edit.
 
 set -e
 
 PI_HOME="$HOME"
 PROJECT_DIR="$PI_HOME/annas-mcp-server"
-CLOUDFLARE_API_TOKEN="g_OsV75zb3bGHdhrjoRnVRTJVokNpve0O8KxG5mL"
-TUNNEL_NAME="annas-mcp"
+TUNNEL_NAME="${TUNNEL_NAME:-annas-mcp}"
+
+# Load .env if it exists (will be loaded after PROJECT_DIR is set)
+# Default values
+CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
+ANNAS_SECRET_KEY="${ANNAS_SECRET_KEY:-}"
+SMTP_USER="${SMTP_USER:-}"
+SMTP_PASSWORD="${SMTP_PASSWORD:-}"
+FROM_EMAIL="${FROM_EMAIL:-}"
+KINDLE_EMAIL="${KINDLE_EMAIL:-}"
 
 echo "🚀 Deploying Anna's Archive MCP Server"
 echo ""
@@ -75,17 +86,40 @@ go build -o annas-mcp ./cmd/annas-mcp
 
 echo ""
 echo "⚙️  Step 3: Setting up .env file..."
-cat > "$PROJECT_DIR/.env" << 'ENVEOF'
+if [ -f "$PROJECT_DIR/.env" ]; then
+    echo "✅ .env file already exists, loading values..."
+    set -a
+    source "$PROJECT_DIR/.env"
+    set +a
+else
+    echo "⚠️  .env file not found. Creating template..."
+    echo "   Please edit $PROJECT_DIR/.env with your actual values!"
+    cat > "$PROJECT_DIR/.env" << 'ENVEOF'
 # Anna's Archive MCP Configuration
-ANNAS_SECRET_KEY=75qvjCeMrSR6LgmR167oG2Wk4uDe5
+# Edit these values with your actual credentials
+
+# Required: Anna's Archive API key (get from https://annas-archive.se/faq#api)
+ANNAS_SECRET_KEY=your-api-key-here
+
+# Optional: Download path
 ANNAS_DOWNLOAD_PATH=/home/pi/Downloads/Anna's Archive
+
+# Email configuration for Kindle (optional)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-SMTP_USER=sam.c.hartman@gmail.com
-SMTP_PASSWORD=qztx aonu afxr qfsg
-FROM_EMAIL=sam.c.hartman@gmail.com
-KINDLE_EMAIL=sam.c.hartman_wvmqMN@kindle.com
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+FROM_EMAIL=your-email@gmail.com
+KINDLE_EMAIL=your-kindle-email@kindle.com
+
+# Cloudflare tunnel (optional, for deploy scripts)
+CLOUDFLARE_API_TOKEN=your-cloudflare-token
 ENVEOF
+    echo ""
+    echo "❌ Please edit $PROJECT_DIR/.env with your actual values before continuing!"
+    echo "   Then run this script again."
+    exit 1
+fi
 
 echo ""
 echo "📥 Step 4: Downloading cloudflared..."
