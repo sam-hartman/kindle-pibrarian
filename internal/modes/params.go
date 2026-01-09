@@ -1,7 +1,8 @@
 package modes
 
 type SearchParams struct {
-	SearchTerm string `json:"term" mcp:"Term to search for"`
+	SearchTerm     string `json:"term" mcp:"Term to search for"`
+	PreferredFormat string `json:"format,omitempty" mcp:"Optional: Preferred format (epub, pdf, mobi). Defaults to epub for Kindle compatibility."`
 }
 
 type DownloadParams struct {

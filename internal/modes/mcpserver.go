@@ -3,9 +3,11 @@ package modes
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -27,11 +29,17 @@ var (
 func SearchTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallToolParamsFor[SearchParams]) (*mcp.CallToolResultFor[any], error) {
 	l := logger.GetLogger()
 
+	preferredFormat := params.Arguments.PreferredFormat
+	if preferredFormat == "" {
+		preferredFormat = "epub" // Default to EPUB for Kindle compatibility
+	}
+
 	l.Info("Search command called",
 		zap.String("searchTerm", params.Arguments.SearchTerm),
+		zap.String("preferredFormat", preferredFormat),
 	)
 
-	books, err := anna.FindBook(params.Arguments.SearchTerm)
+	books, err := anna.FindBookWithFormat(params.Arguments.SearchTerm, preferredFormat)
 	if err != nil {
 		l.Error("Search command failed",
 			zap.String("searchTerm", params.Arguments.SearchTerm),
@@ -145,12 +153,54 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 		Format: format,
 	}
 
-	// Try to email to Kindle first, fall back to regular download if email not configured
+	// Try to email to Kindle first, fall back to regular download if email not configured or file too large
 	err = book.EmailToKindle(secretKey, env.SMTPHost, env.SMTPPort, env.SMTPUser, env.SMTPPassword, env.FromEmail, kindleEmail)
 	if err != nil {
-		// If email fails due to missing config, try regular download
-		if err.Error() == "email configuration incomplete: SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and FROM_EMAIL must be set" {
-			l.Info("Email not configured, falling back to regular download")
+		errStr := err.Error()
+		// Check if we should fall back to regular download
+		shouldFallback := false
+		fallbackReason := ""
+		fileSizeInfo := ""
+		
+		if errStr == "email configuration incomplete: SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and FROM_EMAIL must be set" {
+			shouldFallback = true
+			fallbackReason = "Email not configured"
+		} else if strings.Contains(errStr, "file too large") || strings.Contains(errStr, "size limit") || strings.Contains(errStr, "exceeded") {
+			// Extract file size from error message
+			// Error format: "file too large for email: 12345678 bytes (12.34 MB)..."
+			// Try regex to extract: "12345678 bytes (12.34 MB)"
+			re := regexp.MustCompile(`(\d+)\s+bytes\s+\(([\d.]+)\s+MB\)`)
+			matches := re.FindStringSubmatch(errStr)
+			if len(matches) >= 3 {
+				bytesStr := matches[1]
+				mbStr := matches[2]
+				fileSizeInfo = fmt.Sprintf("File size: %s bytes (%s MB)", bytesStr, mbStr)
+			} else {
+				// Fallback: try simpler pattern
+				if strings.Contains(errStr, "bytes (") {
+					parts := strings.Split(errStr, "bytes (")
+					if len(parts) > 1 {
+						sizePart := strings.Split(parts[1], ")")[0]
+						fileSizeInfo = fmt.Sprintf("File size: %s", sizePart)
+					}
+				}
+			}
+			shouldFallback = true
+			if fileSizeInfo != "" {
+				fallbackReason = fmt.Sprintf("File too large for email - %s. Gmail has a 25MB attachment limit (18MB recommended for email).", fileSizeInfo)
+			} else {
+				fallbackReason = "File too large for email (>18MB). Gmail has a 25MB attachment limit."
+			}
+		} else if strings.Contains(errStr, "broken pipe") {
+			shouldFallback = true
+			fallbackReason = "SMTP connection failed (likely due to file size)"
+		}
+		
+		if shouldFallback {
+			l.Info("Falling back to regular download",
+				zap.String("reason", fallbackReason),
+				zap.String("original_error", errStr),
+			)
 			err = book.Download(secretKey, downloadPath)
 			if err != nil {
 				l.Error("Download command failed",
@@ -166,11 +216,11 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 			)
 			return &mcp.CallToolResultFor[any]{
 				Content: []mcp.Content{&mcp.TextContent{
-					Text: "Book downloaded successfully to path: " + downloadPath,
+					Text: fmt.Sprintf("Book downloaded successfully to path: %s\n\n%s\n\nThe file was saved locally instead of emailing to Kindle.", downloadPath, fallbackReason),
 				}},
 			}, nil
 		}
-		// Email failed for another reason
+		// Email failed for another reason that we can't recover from
 		l.Error("Failed to email book to Kindle",
 			zap.String("bookHash", params.Arguments.BookHash),
 			zap.Error(err),
@@ -203,8 +253,9 @@ func StartMCPServer() {
 	server := mcp.NewServer("annas-mcp", serverVersion, nil)
 
 	server.AddTools(
-		mcp.NewServerTool("search", "Search for books on Anna's Archive. Returns a list of books with metadata including title, authors, format (epub, mobi, pdf, etc.), language, size, and MD5 hash. Use the hash from search results to download a specific book.", SearchTool, mcp.Input(
+		mcp.NewServerTool("search", "Search for books on Anna's Archive. Returns a list of books with metadata including title, authors, format (epub, mobi, pdf, etc.), language, size, and MD5 hash. Results are sorted by format preference (EPUB first by default, as EPUBs are best for Kindle: small file size, reflowable text, adjustable fonts). Use the hash from search results to download a specific book.", SearchTool, mcp.Input(
 			mcp.Property("term", mcp.Description("Search term - can be book title, author name, or any keywords")),
+			mcp.Property("format", mcp.Description("Optional: Preferred format (epub, pdf, mobi). Defaults to 'epub' for Kindle compatibility. EPUBs are recommended as they are small (0.5-5MB), reflowable, and work best on Kindle devices.")),
 		)),
 		mcp.NewServerTool("download", "Download a book and send it to a Kindle email. The book is downloaded from Anna's Archive, saved locally as a backup (if ANNAS_DOWNLOAD_PATH is set), and then emailed to the specified Kindle email address. If no kindle_email is provided, uses the default configured KINDLE_EMAIL. Requires ANNAS_SECRET_KEY for API access and email configuration (SMTP settings) for Kindle delivery. If email is not configured, falls back to local download only. Note: Kindle email only accepts PDF, EPUB, DOC, DOCX, HTML, RTF, and TXT formats - MOBI files will be rejected.", DownloadTool, mcp.Input(
 			mcp.Property("hash", mcp.Description("MD5 hash of the book to download - get this from the search results")),
@@ -240,8 +291,9 @@ func StartMCPHTTPServer(port string) {
 	// Create MCP server instance for tool definitions
 	mcpServer := mcp.NewServer("annas-mcp", serverVersion, nil)
 	mcpServer.AddTools(
-		mcp.NewServerTool("search", "Search for books on Anna's Archive. Returns a list of books with metadata including title, authors, format (epub, mobi, pdf, etc.), language, size, and MD5 hash. Use the hash from search results to download a specific book.", SearchTool, mcp.Input(
+		mcp.NewServerTool("search", "Search for books on Anna's Archive. Returns a list of books with metadata including title, authors, format (epub, mobi, pdf, etc.), language, size, and MD5 hash. Results are sorted by format preference (EPUB first by default, as EPUBs are best for Kindle: small file size, reflowable text, adjustable fonts). Use the hash from search results to download a specific book.", SearchTool, mcp.Input(
 			mcp.Property("term", mcp.Description("Search term - can be book title, author name, or any keywords")),
+			mcp.Property("format", mcp.Description("Optional: Preferred format (epub, pdf, mobi). Defaults to 'epub' for Kindle compatibility. EPUBs are recommended as they are small (0.5-5MB), reflowable, and work best on Kindle devices.")),
 		)),
 		mcp.NewServerTool("download", "Download a book and send it to a Kindle email. The book is downloaded from Anna's Archive, saved locally as a backup (if ANNAS_DOWNLOAD_PATH is set), and then emailed to the specified Kindle email address. If no kindle_email is provided, uses the default configured KINDLE_EMAIL. Requires ANNAS_SECRET_KEY for API access and email configuration (SMTP settings) for Kindle delivery. If email is not configured, falls back to local download only. Note: Kindle email only accepts PDF, EPUB, DOC, DOCX, HTML, RTF, and TXT formats - MOBI files will be rejected.", DownloadTool, mcp.Input(
 			mcp.Property("hash", mcp.Description("MD5 hash of the book to download - get this from the search results")),
@@ -391,13 +443,17 @@ func StartMCPHTTPServer(port string) {
 			tools := []map[string]interface{}{
 				{
 					"name":        "search",
-					"description": "Search for books on Anna's Archive. Returns a list of books with metadata including title, authors, format (epub, mobi, pdf, etc.), language, size, and MD5 hash. Use the hash from search results to download a specific book.",
+					"description": "Search for books on Anna's Archive. Returns a list of books with metadata including title, authors, format (epub, mobi, pdf, etc.), language, size, and MD5 hash. Results are sorted by format preference (EPUB first by default, as EPUBs are best for Kindle: small file size, reflowable text, adjustable fonts). Use the hash from search results to download a specific book.",
 					"inputSchema": map[string]interface{}{
 						"type": "object",
 						"properties": map[string]interface{}{
 							"term": map[string]interface{}{
 								"type":        "string",
 								"description": "Search term - can be book title, author name, or any keywords",
+							},
+							"format": map[string]interface{}{
+								"type":        "string",
+								"description": "Optional: Preferred format (epub, pdf, mobi). Defaults to 'epub' for Kindle compatibility. EPUBs are recommended as they are small (0.5-5MB), reflowable, and work best on Kindle devices.",
 							},
 						},
 						"required": []string{"term"},
@@ -464,8 +520,12 @@ func StartMCPHTTPServer(port string) {
 						return
 					}
 				}
+				format, _ := params.Arguments["format"].(string) // Optional
 				searchParams := &mcp.CallToolParamsFor[SearchParams]{
-					Arguments: SearchParams{SearchTerm: term},
+					Arguments: SearchParams{
+						SearchTerm:      term,
+						PreferredFormat: format,
+					},
 				}
 				result, callErr = SearchTool(ctx, nil, searchParams)
 
@@ -637,12 +697,53 @@ func StartMCPHTTPServer(port string) {
 			Format: req.Format,
 		}
 
-		// Try to email to Kindle first, fall back to regular download if email not configured
+		// Try to email to Kindle first, fall back to regular download if email not configured or file too large
 		err = book.EmailToKindle(env.SecretKey, env.SMTPHost, env.SMTPPort, env.SMTPUser, env.SMTPPassword, env.FromEmail, kindleEmail)
 		if err != nil {
-			// If email fails due to missing config, try regular download
-			if err.Error() == "email configuration incomplete: SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and FROM_EMAIL must be set" {
-				l.Info("Email not configured, falling back to regular download")
+			errStr := err.Error()
+			// Check if we should fall back to regular download
+			shouldFallback := false
+			fallbackReason := ""
+			fileSizeInfo := ""
+			
+			if errStr == "email configuration incomplete: SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and FROM_EMAIL must be set" {
+				shouldFallback = true
+				fallbackReason = "Email not configured"
+			} else if strings.Contains(errStr, "file too large") || strings.Contains(errStr, "size limit") || strings.Contains(errStr, "exceeded") {
+				// Extract file size from error message
+				// Error format: "file too large for email: 12345678 bytes (12.34 MB)..."
+				re := regexp.MustCompile(`(\d+)\s+bytes\s+\(([\d.]+)\s+MB\)`)
+				matches := re.FindStringSubmatch(errStr)
+				if len(matches) >= 3 {
+					bytesStr := matches[1]
+					mbStr := matches[2]
+					fileSizeInfo = fmt.Sprintf("File size: %s bytes (%s MB)", bytesStr, mbStr)
+				} else {
+					// Fallback: try simpler pattern
+					if strings.Contains(errStr, "bytes (") {
+						parts := strings.Split(errStr, "bytes (")
+						if len(parts) > 1 {
+							sizePart := strings.Split(parts[1], ")")[0]
+							fileSizeInfo = fmt.Sprintf("File size: %s", sizePart)
+						}
+					}
+				}
+				shouldFallback = true
+				if fileSizeInfo != "" {
+					fallbackReason = fmt.Sprintf("File too large for email - %s. Gmail has a 25MB attachment limit (18MB recommended for email).", fileSizeInfo)
+				} else {
+					fallbackReason = "File too large for email (>18MB). Gmail has a 25MB attachment limit."
+				}
+			} else if strings.Contains(errStr, "broken pipe") {
+				shouldFallback = true
+				fallbackReason = "SMTP connection failed (likely due to file size)"
+			}
+			
+			if shouldFallback {
+				l.Info("Falling back to regular download",
+					zap.String("reason", fallbackReason),
+					zap.String("original_error", errStr),
+				)
 				err = book.Download(env.SecretKey, env.DownloadPath)
 				if err != nil {
 					l.Error("Download failed", zap.Error(err))
@@ -652,11 +753,11 @@ func StartMCPHTTPServer(port string) {
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(map[string]string{
 					"status":  "success",
-					"message": "Book downloaded successfully to: " + env.DownloadPath,
+					"message": fmt.Sprintf("Book downloaded successfully to: %s\n\n%s\n\nThe file was saved locally instead of emailing to Kindle.", env.DownloadPath, fallbackReason),
 				})
 				return
 			}
-			// Email failed for another reason
+			// Email failed for another reason that we can't recover from
 			l.Error("Failed to email book to Kindle", zap.Error(err))
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
