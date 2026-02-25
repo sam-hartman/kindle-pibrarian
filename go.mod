@@ -1,16 +1,17 @@
-module github.com/iosifache/annas-mcp
+module github.com/sam-hartman-mistral/annas-mcp-server
 
 go 1.23.4
 
 require (
+	github.com/PuerkitoBio/goquery v1.10.3
 	github.com/charmbracelet/fang v0.2.0
 	github.com/gocolly/colly/v2 v2.2.0
 	github.com/modelcontextprotocol/go-sdk v0.1.0
+	github.com/spf13/cobra v1.9.1
 	go.uber.org/zap v1.27.0
 )
 
 require (
-	github.com/PuerkitoBio/goquery v1.10.3 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/antchfx/htmlquery v1.3.4 // indirect
 	github.com/antchfx/xmlquery v1.4.4 // indirect
@@ -37,7 +38,6 @@ require (
 	github.com/nlnwa/whatwg-url v0.6.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d // indirect
-	github.com/spf13/cobra v1.9.1 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/temoto/robotstxt v1.1.2 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect

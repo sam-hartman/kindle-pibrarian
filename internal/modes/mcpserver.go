@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iosifache/annas-mcp/internal/anna"
-	"github.com/iosifache/annas-mcp/internal/logger"
-	"github.com/iosifache/annas-mcp/internal/version"
+	"github.com/sam-hartman-mistral/annas-mcp-server/internal/anna"
+	"github.com/sam-hartman-mistral/annas-mcp-server/internal/logger"
+	"github.com/sam-hartman-mistral/annas-mcp-server/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/zap"
 )
