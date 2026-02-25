@@ -7,10 +7,6 @@
 # 2. Creates directory and .env file
 # 3. Sets up systemd service
 # 4. Installs Tailscale and configures Funnel
-#
-# Environment variables for non-interactive mode:
-#   ANNAS_SECRET_KEY  - Pre-set API key (skips prompt)
-#   SKIP_TAILSCALE=1  - Skip Tailscale setup (for testing)
 
 set -e
 
@@ -97,16 +93,11 @@ if [ ! -f "$INSTALL_DIR/.env" ]; then
     echo "=============================================="
     echo ""
 
-    # Use env var if set, otherwise prompt
-    if [ -n "$ANNAS_SECRET_KEY" ]; then
-        echo "Using API key from environment variable"
-        ANNAS_KEY="$ANNAS_SECRET_KEY"
-    else
-        echo "You need an Anna's Archive API key."
-        echo "Get one at: https://annas-archive.li/faq#api"
-        echo ""
-        read -p "Enter your API key (or press Enter to skip): " ANNAS_KEY
-    fi
+    # Prompt for API key
+    echo "You need an Anna's Archive API key."
+    echo "Get one at: https://annas-archive.li/faq#api"
+    echo ""
+    read -p "Enter your API key (or press Enter to skip): " ANNAS_KEY
 
     # Create .env
     cat > "$INSTALL_DIR/.env" << EOF
@@ -170,43 +161,38 @@ sudo systemctl start annas-mcp
 
 echo "Service started!"
 
-# Tailscale setup (skip if SKIP_TAILSCALE=1)
-if [ "$SKIP_TAILSCALE" = "1" ]; then
+# Tailscale setup
+echo ""
+echo "=============================================="
+echo "  Tailscale Funnel Setup"
+echo "=============================================="
+echo ""
+
+if ! command -v tailscale >/dev/null 2>&1; then
+    echo "Installing Tailscale..."
+    curl -fsSL https://tailscale.com/install.sh | sh
+fi
+
+# Check if Tailscale is connected
+if ! tailscale status >/dev/null 2>&1; then
     echo ""
-    echo "Skipping Tailscale setup (SKIP_TAILSCALE=1)"
+    echo "Tailscale needs authentication."
+    echo "Running 'sudo tailscale up'..."
+    echo ""
+    sudo tailscale up
+fi
+
+# Enable Funnel
+echo ""
+echo "Enabling Tailscale Funnel..."
+if sudo tailscale funnel --bg 8081 2>&1 | grep -q "not enabled"; then
+    echo ""
+    echo "Funnel needs to be enabled on your tailnet."
+    echo "Visit the URL above to enable it, then run:"
+    echo "  sudo tailscale funnel --bg 8081"
 else
     echo ""
-    echo "=============================================="
-    echo "  Tailscale Funnel Setup"
-    echo "=============================================="
-    echo ""
-
-    if ! command -v tailscale >/dev/null 2>&1; then
-        echo "Installing Tailscale..."
-        curl -fsSL https://tailscale.com/install.sh | sh
-    fi
-
-    # Check if Tailscale is connected
-    if ! tailscale status >/dev/null 2>&1; then
-        echo ""
-        echo "Tailscale needs authentication."
-        echo "Running 'sudo tailscale up'..."
-        echo ""
-        sudo tailscale up
-    fi
-
-    # Enable Funnel
-    echo ""
-    echo "Enabling Tailscale Funnel..."
-    if sudo tailscale funnel --bg 8081 2>&1 | grep -q "not enabled"; then
-        echo ""
-        echo "Funnel needs to be enabled on your tailnet."
-        echo "Visit the URL above to enable it, then run:"
-        echo "  sudo tailscale funnel --bg 8081"
-    else
-        echo ""
-        sudo tailscale funnel status
-    fi
+    sudo tailscale funnel status
 fi
 
 # Done

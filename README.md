@@ -216,8 +216,7 @@ The server exposes these endpoints:
   - `ping` - Health check
   - `tools/list` - List available tools
   - `tools/call` - Execute a tool (search or download)
-- `POST /search` - Direct search endpoint (legacy)
-- `POST /download` - Direct download endpoint (legacy)
+- `GET /ping` - Health check endpoint
 
 ### As a CLI Tool
 

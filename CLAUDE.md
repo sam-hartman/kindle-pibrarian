@@ -57,25 +57,6 @@ git push --tags
 
 **Why public?** The one-liner uses GitHub's public API to fetch releases. Private repos require authentication tokens.
 
-**Testing the installer** (after repo is public):
-```bash
-# On the Pi - full test with Tailscale
-./tests/test-installer.sh
-
-# Quick test - skip Tailscale setup
-./tests/test-installer.sh --quick
-```
-
-The test script:
-1. Cleans up existing installation
-2. Runs installer with `ANNAS_SECRET_KEY` from .env (non-interactive)
-3. Verifies binary, .env, service, and HTTP endpoint
-
-**Non-interactive install** (for automation):
-```bash
-ANNAS_SECRET_KEY=your-key SKIP_TAILSCALE=1 bash install.sh
-```
-
 ## Important Reminders
 1. **Module path may change** - Repo will move to different GitHub org. When that happens, update `go.mod` and all import paths.
 
