@@ -32,10 +32,12 @@ git push --tags
 # GitHub Actions will auto-build binaries via goreleaser
 ```
 
-If adding install script, update it when:
+## Install Script
+`install.sh` is a one-liner installer. Update it when:
 - `.env` format changes
 - Setup steps change
 - Tailscale setup process changes
+- Repository URL changes
 
 ## Important Reminders
 1. **Module path may change** - Repo will move to different GitHub org. When that happens, update `go.mod` and all import paths.
