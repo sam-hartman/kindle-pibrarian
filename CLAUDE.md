@@ -39,6 +39,24 @@ git push --tags
 - Tailscale setup process changes
 - Repository URL changes
 
+## TODO: Finish One-Liner Installer Setup
+**Status**: GitHub Actions workflow is set up and working. Releases (v1.0.0, v1.0.1) have been built.
+
+**What's left**:
+1. Move repo to personal GitHub account (currently on `sam-hartman-mistral`)
+2. Make repo **public** (required for one-liner to work without auth)
+3. Update these files with new repo URL:
+   - `go.mod` - module path
+   - `install.sh` - REPO variable at top
+   - `README.md` - all GitHub URLs
+   - All import paths in Go files (use grep for old org name)
+4. Test the one-liner:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/NEW_USER/annas-mcp-server/main/install.sh | bash
+   ```
+
+**Why public?** The one-liner uses GitHub's public API to fetch releases. Private repos require authentication tokens.
+
 ## Important Reminders
 1. **Module path may change** - Repo will move to different GitHub org. When that happens, update `go.mod` and all import paths.
 
