@@ -1,11 +1,8 @@
 package modes
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
-	"net/smtp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,67 +14,6 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
-
-// sendTestFileToKindle sends a test file to Kindle to verify email configuration
-func sendTestFileToKindle(fileData []byte, filename string, book *anna.Book, env *Env) error {
-	l := logger.GetLogger()
-
-	// Determine MIME type based on format
-	mimeType := "application/pdf"
-	if strings.HasSuffix(filename, ".epub") {
-		mimeType = "application/epub+zip"
-	}
-
-	// Create email message
-	var emailBody bytes.Buffer
-	emailBody.WriteString(fmt.Sprintf("From: %s\r\n", env.FromEmail))
-	emailBody.WriteString(fmt.Sprintf("To: %s\r\n", env.KindleEmail))
-	emailBody.WriteString(fmt.Sprintf("Subject: %s\r\n", filename))
-	emailBody.WriteString("MIME-Version: 1.0\r\n")
-	emailBody.WriteString(fmt.Sprintf("Content-Type: multipart/mixed; boundary=boundary123\r\n\r\n"))
-	
-	// Email body
-	emailBody.WriteString("--boundary123\r\n")
-	emailBody.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
-	emailBody.WriteString(fmt.Sprintf("Test Book: %s\r\n", book.Title))
-	emailBody.WriteString("This is a test email to verify Kindle email functionality.\r\n")
-	emailBody.WriteString("\r\n")
-	
-	// Attachment
-	emailBody.WriteString("--boundary123\r\n")
-	emailBody.WriteString(fmt.Sprintf("Content-Type: %s; name=\"%s\"\r\n", mimeType, filename))
-	emailBody.WriteString("Content-Transfer-Encoding: base64\r\n")
-	emailBody.WriteString(fmt.Sprintf("Content-Disposition: attachment; filename=\"%s\"\r\n\r\n", filename))
-	
-	// Encode file as base64
-	encoded := base64.StdEncoding.EncodeToString(fileData)
-	// Split into lines of 76 characters (RFC 2045)
-	for i := 0; i < len(encoded); i += 76 {
-		end := i + 76
-		if end > len(encoded) {
-			end = len(encoded)
-		}
-		emailBody.WriteString(encoded[i:end] + "\r\n")
-	}
-	
-	emailBody.WriteString("\r\n--boundary123--\r\n")
-
-	// Send email via SMTP
-	addr := fmt.Sprintf("%s:%s", env.SMTPHost, env.SMTPPort)
-	auth := smtp.PlainAuth("", env.SMTPUser, env.SMTPPassword, env.SMTPHost)
-
-	l.Info("Sending test file to Kindle",
-		zap.String("filename", filename),
-		zap.String("kindle_email", env.KindleEmail),
-	)
-
-	err := smtp.SendMail(addr, auth, env.FromEmail, []string{env.KindleEmail}, emailBody.Bytes())
-	if err != nil {
-		return fmt.Errorf("failed to send email: %w", err)
-	}
-
-	return nil
-}
 
 func StartCLI() {
 	l := logger.GetLogger()
@@ -244,14 +180,25 @@ func StartCLI() {
 			testContent := []byte("%PDF-1.4\n1 0 obj\n<<\n/Type /Catalog\n>>\nendobj\nxref\n0 1\ntrailer\n<<\n/Size 1\n>>\nstartxref\n9\n%%EOF")
 			filename := "test-book.pdf"
 
-			// Create a temporary book object for emailing
-			book := &anna.Book{
-				Title:  "Test Book - Email Functionality",
-				Format: "pdf",
+			// Determine MIME type based on filename
+			mimeType := "application/pdf"
+			if strings.HasSuffix(filename, ".epub") {
+				mimeType = "application/epub+zip"
 			}
 
-			// Use a helper function to send the test file
-			err = sendTestFileToKindle(testContent, filename, book, env)
+			// Use exported helper function to send test file
+			err = anna.SendFileToKindle(
+				testContent,
+				filename,
+				mimeType,
+				"Test Book - Email Functionality",
+				env.SMTPHost,
+				env.SMTPPort,
+				env.SMTPUser,
+				env.SMTPPassword,
+				env.FromEmail,
+				env.KindleEmail,
+			)
 			if err != nil {
 				return fmt.Errorf("failed to send test email: %w", err)
 			}

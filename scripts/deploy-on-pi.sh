@@ -98,7 +98,7 @@ cat > "$PROJECT_DIR/.env" << 'ENVEOF'
 # Anna's Archive MCP Configuration
 # Edit these values with your actual credentials
 
-# Required: Anna's Archive API key (get from https://annas-archive.se/faq#api)
+# Required: Anna's Archive API key (get from https://annas-archive.li/faq#api)
 ANNAS_SECRET_KEY=your-api-key-here
 
 # Optional: Download path

@@ -1,6 +1,6 @@
 # Anna's Archive MCP Server (and CLI Tool)
 
-[An MCP server](https://modelcontextprotocol.io/introduction) and CLI tool for searching and downloading documents from [Anna's Archive](https://annas-archive.se)
+[An MCP server](https://modelcontextprotocol.io/introduction) and CLI tool for searching and downloading documents from [Anna's Archive](https://annas-archive.li)
 
 ## ⚠️ Legal Disclaimer
 
@@ -41,8 +41,8 @@ The authors and contributors of this software:
 
 ## Requirements
 
-- [A donation to Anna's Archive](https://annas-archive.se/donate), which grants JSON API access
-- [An API key](https://annas-archive.se/faq#api)
+- [A donation to Anna's Archive](https://annas-archive.li/donate), which grants JSON API access
+- [An API key](https://annas-archive.li/faq#api)
 - Go 1.23+ (if building from source)
 
 For MCP server functionality, you also need an MCP client, such as:
@@ -215,6 +215,9 @@ The server exposes these endpoints:
 
 # Download a book
 ./annas-mcp download <hash> <filename>
+
+# Test email configuration (sends a test file to Kindle)
+./annas-mcp test-email
 ```
 
 ## Features
@@ -227,6 +230,7 @@ The server exposes these endpoints:
 - 📊 **Structured content** - Search results include book metadata in JSON format
 - 🔒 **Secure configuration** via `.env` file
 - 🛡️ **Duplicate protection** - Prevents sending the same book to the same Kindle multiple times
+- 🧹 **Clean codebase** - Refactored and simplified with consolidated email logic
 
 ## MCP Tools
 
@@ -260,8 +264,7 @@ Download a book and send it to a Kindle email address.
 
 - [docs/LE_CHAT_SETUP.md](docs/LE_CHAT_SETUP.md) - Setup guide for Mistral Le Chat
 - [docs/KINDLE_EMAIL_SETUP.md](docs/KINDLE_EMAIL_SETUP.md) - Guide for emailing books to Kindle
-- [docs/PROJECT_ORGANIZATION.md](docs/PROJECT_ORGANIZATION.md) - Project structure and organization standards
-- [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md) - Security considerations
+- [docs/PI_TROUBLESHOOTING.md](docs/PI_TROUBLESHOOTING.md) - Raspberry Pi troubleshooting
 
 ## Project Structure
 
@@ -290,24 +293,21 @@ annas-mcp/
 │
 ├── scripts/                      # Deployment and utility scripts
 │   ├── deploy-on-pi.sh         # Deploy directly on Raspberry Pi
-│   ├── deploy-to-pi.sh         # Deploy from Mac to Pi
 │   ├── deploy-with-tunnel.sh   # Deploy with Cloudflare tunnel
 │   ├── raspberry-pi-setup.sh   # Systemd service configuration
 │   ├── setup-email-env.sh      # Email configuration helper
-│   └── start-server.sh          # Start HTTP server (auto-detects email config)
+│   ├── start-server.sh         # Start HTTP server (auto-detects email config)
+│   └── test-cloudflare-tunnel.sh # Test Cloudflare tunnel connection
 │
 ├── docs/                         # Documentation
 │   ├── LE_CHAT_SETUP.md        # Mistral Le Chat setup guide
 │   ├── KINDLE_EMAIL_SETUP.md   # Kindle email configuration
 │   ├── PI_TROUBLESHOOTING.md   # Raspberry Pi troubleshooting
-│   ├── PROJECT_ORGANIZATION.md # File organization standards
-│   ├── SECURITY_AUDIT.md       # Security considerations
-│   └── AGENT_SYSTEM_PROMPT.md  # Agent system prompt
+│   └── PROJECT_ORGANIZATION.md # File organization standards
 │
 ├── tests/                        # Test scripts and utilities
 │   ├── test-repo-comprehensive.sh  # Comprehensive test suite
-│   ├── test-end-to-end.sh       # End-to-end testing
-│   └── diagnose-pi.sh           # Pi connectivity diagnostics
+│   └── test-end-to-end.sh       # End-to-end testing
 │
 ├── .env.example                  # Environment variable template
 ├── .gitignore                    # Git ignore rules
@@ -327,7 +327,8 @@ annas-mcp/
 - **`internal/anna/`** - Anna's Archive integration
   - `FindBook()` - Web scraping search functionality
   - `Download()` - Download books via API
-  - `EmailToKindle()` - Email books to Kindle devices
+  - `EmailToKindle()` - Email books to Kindle devices (downloads and sends)
+  - `SendFileToKindle()` - Helper function for sending file data to Kindle (reusable email logic)
 
 - **`internal/modes/`** - Application modes
   - `StartMCPServer()` - MCP protocol server (stdio)
@@ -335,7 +336,7 @@ annas-mcp/
   - `SearchTool()` - MCP search tool implementation
   - `DownloadTool()` - MCP download tool implementation
 
-- **`internal/logger/`** - Structured logging with zap
+- **`internal/logger/`** - Structured logging with zap (simplified, unified configuration)
 
 - **`internal/version/`** - Version management
 
@@ -343,6 +344,12 @@ annas-mcp/
 1. MCP client → `mcpserver.go` → `SearchTool()` → `anna.FindBook()`
 2. Search results → `structuredContent` (wrapped in `{"items": [...]}`)
 3. Download request → `DownloadTool()` → `anna.EmailToKindle()` or `anna.Download()`
+
+**Code Architecture**:
+- Email sending logic is consolidated in `SendFileToKindle()` helper function
+- Both `EmailToKindle()` and CLI test-email command use the same reusable helper
+- Logger uses simplified, unified configuration (no mode-specific logic)
+- Reduced code duplication and improved maintainability
 
 ## Deployment
 

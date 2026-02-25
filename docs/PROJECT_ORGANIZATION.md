@@ -11,7 +11,6 @@ All test scripts, diagnostic scripts, and test-related utilities should be place
 
 **Current test scripts:**
 - Test scripts: `test-repo-comprehensive.sh`, `test-end-to-end.sh`
-- Diagnostic scripts: `diagnose-pi.sh`
 
 ### Shell Scripts
 **Location:** `scripts/` directory
@@ -19,7 +18,7 @@ All test scripts, diagnostic scripts, and test-related utilities should be place
 All shell scripts (.sh files) should be placed in the `scripts/` directory.
 
 **Core scripts:**
-- Deployment: `deploy-on-pi.sh`, `deploy-with-tunnel.sh`, `deploy-to-pi.sh`
+- Deployment: `deploy-on-pi.sh`, `deploy-with-tunnel.sh`
 - Setup: `raspberry-pi-setup.sh`, `setup-email-env.sh`
 - Server: `start-server.sh` (consolidated - auto-detects email config)
 
@@ -34,7 +33,6 @@ All project documentation and markdown files should be placed in the `docs/` dir
 
 **Current documentation:**
 - Setup guides: `KINDLE_EMAIL_SETUP.md`, `LE_CHAT_SETUP.md`
-- Documentation: `AGENT_SYSTEM_PROMPT.md`, `SECURITY_AUDIT.md`
 - Troubleshooting: `PI_TROUBLESHOOTING.md`
 - Organization: `PROJECT_ORGANIZATION.md` (this file)
 

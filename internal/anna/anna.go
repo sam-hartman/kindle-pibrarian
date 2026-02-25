@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	AnnasSearchEndpoint   = "https://annas-archive.se/search?q=%s"
-	AnnasDownloadEndpoint = "https://annas-archive.se/dyn/api/fast_download.json?md5=%s&key=%s"
+	AnnasSearchEndpoint   = "https://annas-archive.li/search?q=%s"
+	AnnasDownloadEndpoint = "https://annas-archive.li/dyn/api/fast_download.json?md5=%s&key=%s&domain_index=%d"
 )
 
 // SendFileToKindle sends file data to Kindle email address (exported for test email command)
@@ -36,10 +36,10 @@ func SendFileToKindle(fileData []byte, filename, mimeType, subject, smtpHost, sm
 	// so we need to check if the original file is under ~19MB (19MB * 1.33 ≈ 25MB)
 	// Adding some overhead for email headers, we'll use 18MB as the limit
 	const maxFileSizeForEmail = 18 * 1024 * 1024 // 18MB
-	
+
 	fileSize := int64(len(fileData))
 	if fileSize > maxFileSizeForEmail {
-		return fmt.Errorf("file too large for email: %d bytes (%.2f MB). Gmail has a 25MB attachment limit. Files larger than ~18MB cannot be sent via email. Consider downloading directly instead", 
+		return fmt.Errorf("file too large for email: %d bytes (%.2f MB). Gmail has a 25MB attachment limit. Files larger than ~18MB cannot be sent via email. Consider downloading directly instead",
 			fileSize, float64(fileSize)/(1024*1024))
 	}
 
@@ -92,11 +92,11 @@ func SendFileToKindle(fileData []byte, filename, mimeType, subject, smtpHost, sm
 		// Check if error is related to file size
 		errStr := err.Error()
 		if strings.Contains(errStr, "exceeded") || strings.Contains(errStr, "size limit") || strings.Contains(errStr, "552") {
-			return fmt.Errorf("file too large for Gmail (25MB limit): %w. Original file size: %d bytes (%.2f MB). Consider downloading directly instead", 
+			return fmt.Errorf("file too large for Gmail (25MB limit): %w. Original file size: %d bytes (%.2f MB). Consider downloading directly instead",
 				err, fileSize, float64(fileSize)/(1024*1024))
 		}
 		if strings.Contains(errStr, "broken pipe") {
-			return fmt.Errorf("SMTP connection closed prematurely (likely due to file size or network issue): %w. File size: %d bytes (%.2f MB). Try again or download directly", 
+			return fmt.Errorf("SMTP connection closed prematurely (likely due to file size or network issue): %w. File size: %d bytes (%.2f MB). Try again or download directly",
 				err, fileSize, float64(fileSize)/(1024*1024))
 		}
 		return fmt.Errorf("failed to send email: %w", err)
@@ -285,6 +285,102 @@ func extractMetaInformation(meta string) (language, format, size string) {
 	return language, format, size
 }
 
+// downloadFileData downloads a file from Anna's Archive using the API.
+// It tries multiple download servers and returns the file data.
+func downloadFileData(hash, secretKey string) ([]byte, error) {
+	l := logger.GetLogger()
+
+	var fileData []byte
+	var lastErr error
+
+	// Try different domain indices (download servers) until one works
+	for domainIndex := 0; domainIndex <= 4; domainIndex++ {
+		apiURL := fmt.Sprintf(AnnasDownloadEndpoint, hash, secretKey, domainIndex)
+		l.Info("Fetching download URL from Anna's Archive API",
+			zap.String("hash", hash),
+			zap.Int("domainIndex", domainIndex),
+		)
+
+		resp, err := http.Get(apiURL)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to get download URL: %w", err)
+			continue
+		}
+
+		var apiResp fastDownloadResponse
+		if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("failed to decode API response: %w", err)
+			continue
+		}
+		resp.Body.Close()
+
+		// Check HTTP status code first
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+			if apiResp.Error != "" {
+				lastErr = fmt.Errorf("API error (status %d): %s", resp.StatusCode, apiResp.Error)
+			} else {
+				lastErr = fmt.Errorf("API request failed with status code: %d", resp.StatusCode)
+			}
+			continue
+		}
+
+		if apiResp.DownloadURL == "" {
+			if apiResp.Error != "" {
+				lastErr = fmt.Errorf("Anna's Archive API error: %s", apiResp.Error)
+			} else {
+				lastErr = errors.New("failed to get download URL from API")
+			}
+			continue
+		}
+
+		// Create HTTP client with timeout
+		client := &http.Client{Timeout: 60 * time.Second}
+		downloadResp, err := client.Get(apiResp.DownloadURL)
+		if err != nil {
+			l.Warn("Download server failed, trying next",
+				zap.Int("domainIndex", domainIndex),
+				zap.Error(err),
+			)
+			lastErr = fmt.Errorf("failed to download file: %w", err)
+			continue
+		}
+
+		if downloadResp.StatusCode != http.StatusOK {
+			downloadResp.Body.Close()
+			l.Warn("Download server returned non-200, trying next",
+				zap.Int("domainIndex", domainIndex),
+				zap.Int("status", downloadResp.StatusCode),
+			)
+			lastErr = fmt.Errorf("download server returned status %d", downloadResp.StatusCode)
+			continue
+		}
+
+		// Successfully connected, read the file
+		fileData, err = io.ReadAll(downloadResp.Body)
+		downloadResp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read file: %w", err)
+			continue
+		}
+
+		l.Info("Successfully downloaded from server",
+			zap.Int("domainIndex", domainIndex),
+			zap.Int("size", len(fileData)),
+		)
+		break
+	}
+
+	if len(fileData) == 0 {
+		if lastErr != nil {
+			return nil, fmt.Errorf("all download servers failed: %w", lastErr)
+		}
+		return nil, errors.New("failed to download file from any server")
+	}
+
+	return fileData, nil
+}
+
 func FindBook(query string) ([]*Book, error) {
 	return FindBookWithFormat(query, "")
 }
@@ -301,7 +397,7 @@ func FindBookWithFormat(query, preferredFormat string) ([]*Book, error) {
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true,
-			ServerName:         "annas-archive.se", // Updated to new domain
+			ServerName:         "annas-archive.li", // Updated to new domain
 		},
 		DisableCompression: false,
 		ForceAttemptHTTP2:  false, // Use HTTP/1.1
@@ -607,13 +703,13 @@ func FindBookWithFormat(query, preferredFormat string) ([]*Book, error) {
 		preferredFormat = "epub"
 	}
 	preferredFormat = strings.ToLower(preferredFormat)
-	
+
 	// Sort to put preferred format first
 	if len(bookListParsed) > 0 {
 		// Move preferred format to front
 		var preferred []*Book
 		var others []*Book
-		
+
 		for _, book := range bookListParsed {
 			if strings.ToLower(book.Format) == preferredFormat {
 				preferred = append(preferred, book)
@@ -621,10 +717,10 @@ func FindBookWithFormat(query, preferredFormat string) ([]*Book, error) {
 				others = append(others, book)
 			}
 		}
-		
+
 		// Combine: preferred first, then others
 		bookListParsed = append(preferred, others...)
-		
+
 		l.Info("Search results sorted by format preference",
 			zap.String("preferredFormat", preferredFormat),
 			zap.Int("preferredCount", len(preferred)),
@@ -644,53 +740,14 @@ func (b *Book) Download(secretKey, folderPath string) error {
 		zap.String("folderPath", folderPath),
 	)
 
-	apiURL := fmt.Sprintf(AnnasDownloadEndpoint, b.Hash, secretKey)
-
-	resp, err := http.Get(apiURL)
+	// Download file using shared helper
+	fileData, err := downloadFileData(b.Hash, secretKey)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
 
-	var apiResp fastDownloadResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return fmt.Errorf("failed to decode API response: %w", err)
-	}
-
-	// Check HTTP status code first
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		if apiResp.Error != "" {
-			return fmt.Errorf("API error (status %d): %s", resp.StatusCode, apiResp.Error)
-		}
-		return fmt.Errorf("API request failed with status code: %d", resp.StatusCode)
-	}
-
-	if apiResp.DownloadURL == "" {
-		if apiResp.Error != "" {
-			return fmt.Errorf("Anna's Archive API error: %s (this usually means the book hash is invalid or the book doesn't exist)", apiResp.Error)
-		}
-		return errors.New("failed to get download URL from API")
-	}
-
-	downloadResp, err := http.Get(apiResp.DownloadURL)
-	if err != nil {
-		return err
-	}
-	defer downloadResp.Body.Close()
-
-	if downloadResp.StatusCode != http.StatusOK {
-		return errors.New("failed to download file")
-	}
-
-	// Read the file into memory
-	fileData, err := io.ReadAll(downloadResp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
-	}
-
-	// Detect actual file format from Content-Type and file content
-	contentType := downloadResp.Header.Get("Content-Type")
-	actualFormat, _ := detectFileFormat(contentType, fileData)
+	// Detect actual file format from file content
+	actualFormat, _ := detectFileFormat("", fileData)
 
 	// Use detected format if available, otherwise fall back to search result format
 	format := actualFormat
@@ -703,13 +760,13 @@ func (b *Book) Download(secretKey, folderPath string) error {
 
 	// Check if file already exists to avoid duplicates
 	if _, err := os.Stat(filePath); err == nil {
-		logger.GetLogger().Info("File already exists, skipping save",
+		l.Info("File already exists, skipping save",
 			zap.String("path", filePath),
 		)
 	} else {
 		if err := os.WriteFile(filePath, fileData, 0644); err != nil {
 			// Log but don't fail if we can't save to disk
-			logger.GetLogger().Warn("Failed to save file to disk", zap.Error(err))
+			l.Warn("Failed to save file to disk", zap.Error(err))
 		}
 	}
 
@@ -731,56 +788,14 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 		return errors.New("email configuration incomplete: SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and FROM_EMAIL must be set")
 	}
 
-	// Download the file first
-	apiURL := fmt.Sprintf(AnnasDownloadEndpoint, b.Hash, secretKey)
-	l.Info("Fetching download URL from Anna's Archive API",
-		zap.String("hash", b.Hash),
-	)
-	resp, err := http.Get(apiURL)
+	// Download file using shared helper
+	fileData, err := downloadFileData(b.Hash, secretKey)
 	if err != nil {
-		return fmt.Errorf("failed to get download URL: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var apiResp fastDownloadResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return fmt.Errorf("failed to decode API response: %w", err)
+		return err
 	}
 
-	// Check HTTP status code first
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		if apiResp.Error != "" {
-			return fmt.Errorf("API error (status %d): %s", resp.StatusCode, apiResp.Error)
-		}
-		return fmt.Errorf("API request failed with status code: %d", resp.StatusCode)
-	}
-
-	if apiResp.DownloadURL == "" {
-		if apiResp.Error != "" {
-			return fmt.Errorf("Anna's Archive API error: %s (this usually means the book hash is invalid or the book doesn't exist)", apiResp.Error)
-		}
-		return errors.New("failed to get download URL from API")
-	}
-
-	downloadResp, err := http.Get(apiResp.DownloadURL)
-	if err != nil {
-		return fmt.Errorf("failed to download file: %w", err)
-	}
-	defer downloadResp.Body.Close()
-
-	if downloadResp.StatusCode != http.StatusOK {
-		return errors.New("failed to download file")
-	}
-
-	// Read file data
-	fileData, err := io.ReadAll(downloadResp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
-	}
-
-	// Detect actual file format from Content-Type and file content
-	contentType := downloadResp.Header.Get("Content-Type")
-	actualFormat, detectedMimeType := detectFileFormat(contentType, fileData)
+	// Detect actual file format from file content (Content-Type may not be reliable)
+	actualFormat, _ := detectFileFormat("", fileData)
 
 	// Save to disk as backup (optional, uses ANNAS_DOWNLOAD_PATH if set)
 	// This allows you to have a local copy even when emailing
@@ -830,20 +845,35 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 
 	// Use detected format if available, otherwise fall back to search result format
 	format := actualFormat
+	var mimeType string
 	if format == "unknown" {
 		format = b.Format
 		// Determine MIME type based on format if detection failed
 		switch strings.ToLower(b.Format) {
 		case "pdf":
-			detectedMimeType = "application/pdf"
+			mimeType = "application/pdf"
 		case "epub":
-			detectedMimeType = "application/epub+zip"
+			mimeType = "application/epub+zip"
 		case "mobi":
-			detectedMimeType = "application/x-mobipocket-ebook"
+			mimeType = "application/x-mobipocket-ebook"
 		case "azw", "azw3":
-			detectedMimeType = "application/vnd.amazon.ebook"
+			mimeType = "application/vnd.amazon.ebook"
 		default:
-			detectedMimeType = "application/octet-stream"
+			mimeType = "application/octet-stream"
+		}
+	} else {
+		// Set MIME type based on detected format
+		switch format {
+		case "pdf":
+			mimeType = "application/pdf"
+		case "epub":
+			mimeType = "application/epub+zip"
+		case "mobi":
+			mimeType = "application/x-mobipocket-ebook"
+		case "azw", "azw3":
+			mimeType = "application/vnd.amazon.ebook"
+		default:
+			mimeType = "application/octet-stream"
 		}
 	}
 
@@ -859,22 +889,20 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 	}
 
 	filename := sanitizeFilename(b.Title) + "." + format
-	mimeType := detectedMimeType
 
 	// Log format detection for debugging
 	if actualFormat != "unknown" && actualFormat != strings.ToLower(b.Format) {
 		l.Info("File format mismatch detected",
 			zap.String("expected_format", b.Format),
 			zap.String("actual_format", actualFormat),
-			zap.String("content_type", contentType),
 		)
 	}
 
 	// Send email using helper function
 	subject := "Book: " + b.Title
-	err = SendFileToKindle(fileData, filename, mimeType, subject, smtpHost, smtpPort, smtpUser, smtpPassword, fromEmail, kindleEmail)
-	if err != nil {
-		return err
+	sendErr := SendFileToKindle(fileData, filename, mimeType, subject, smtpHost, smtpPort, smtpUser, smtpPassword, fromEmail, kindleEmail)
+	if sendErr != nil {
+		return sendErr
 	}
 
 	l.Info("Book sent to Kindle successfully",
