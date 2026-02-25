@@ -102,16 +102,16 @@ else
         if sshpass -p "$PI_PASS" ssh -o StrictHostKeyChecking=no "$PI_USER@$PI_HOST" "systemctl is-active annas-mcp" >/dev/null 2>&1; then
             test_pass "MCP server service is active on Pi"
             
-            # Get tunnel URL
-            TUNNEL_URL=$(sshpass -p "$PI_PASS" ssh -o StrictHostKeyChecking=no "$PI_USER@$PI_HOST" \
-                "journalctl -u cloudflared-tunnel -n 50 2>/dev/null | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1" || echo "")
-            
-            if [ -n "$TUNNEL_URL" ]; then
-                test_pass "Cloudflare tunnel is active: $TUNNEL_URL"
-                MCP_SERVER_URL="$TUNNEL_URL"
+            # Get Tailscale Funnel URL
+            FUNNEL_URL=$(sshpass -p "$PI_PASS" ssh -o StrictHostKeyChecking=no "$PI_USER@$PI_HOST" \
+                "tailscale funnel status 2>/dev/null | grep -o 'https://[a-z0-9.-]*\.ts\.net' | head -1" || echo "")
+
+            if [ -n "$FUNNEL_URL" ]; then
+                test_pass "Tailscale Funnel is active: $FUNNEL_URL"
+                MCP_SERVER_URL="$FUNNEL_URL"
             else
-                test_warn "Cloudflare tunnel URL not found, using localhost"
-                MCP_SERVER_URL="http://$PI_HOST:8080"
+                test_warn "Tailscale Funnel URL not found, using direct IP"
+                MCP_SERVER_URL="http://$PI_HOST:8081"
             fi
             
             echo ""

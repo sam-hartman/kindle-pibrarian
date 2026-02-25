@@ -18,7 +18,7 @@ All test scripts, diagnostic scripts, and test-related utilities should be place
 All shell scripts (.sh files) should be placed in the `scripts/` directory.
 
 **Core scripts:**
-- Deployment: `deploy-on-pi.sh`, `deploy-with-tunnel.sh`
+- Deployment: `deploy-on-pi.sh` (includes Tailscale Funnel setup)
 - Setup: `raspberry-pi-setup.sh`, `setup-email-env.sh`
 - Server: `start-server.sh` (consolidated - auto-detects email config)
 

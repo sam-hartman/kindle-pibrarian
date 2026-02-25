@@ -1,130 +1,135 @@
-# Raspberry Pi SSH Connectivity Troubleshooting
+# Raspberry Pi Troubleshooting
 
-## Current Status
-✅ **Cloudflare tunnel is working** - Pi is online and services are running  
-❌ **SSH is not accessible** - Cannot connect from local network
+## Common Issues
 
-## Diagnosis
-The Pi can make **outbound** connections (Cloudflare tunnel works) but cannot receive **inbound** connections (SSH blocked).
+### SSH Connection Issues
 
-## Most Likely Causes
-
-### 1. Network Isolation / Different Networks
 **Symptoms:**
-- Pi and Mac are on different WiFi networks or VLANs
-- Pi can reach internet but not local network
+- Cannot connect via SSH
+- Connection refused or timeout
 
-**Solution:**
-- Ensure both devices are on the **same WiFi network**
-- Check router settings for VLAN isolation
-- Try connecting Mac to same network as Pi
+**Solutions:**
 
-### 2. Router Firewall Blocking Local Access
-**Symptoms:**
-- Router has firewall rules blocking local device-to-device communication
-- Outbound internet works, but local connections fail
-
-**Solution:**
-- Check router admin panel for firewall settings
-- Look for "AP Isolation" or "Client Isolation" settings (disable them)
-- Check for any firewall rules blocking port 22
-
-### 3. SSH Service Disabled on Pi
-**Symptoms:**
-- SSH daemon not running on Pi
-
-**Solution (if you have physical/keyboard access to Pi):**
-```bash
-# Check SSH status
-sudo systemctl status ssh
-
-# Enable and start SSH
-sudo systemctl enable ssh
-sudo systemctl start ssh
-
-# Verify it's running
-sudo systemctl status ssh
-```
-
-### 4. Pi Firewall Blocking SSH
-**Symptoms:**
-- UFW or iptables blocking port 22
-
-**Solution (if you have physical/keyboard access to Pi):**
-```bash
-# Check UFW status
-sudo ufw status
-
-# Allow SSH if UFW is active
-sudo ufw allow 22/tcp
-
-# Or check iptables
-sudo iptables -L -n | grep 22
-```
-
-### 5. IP Address Changed
-**Symptoms:**
-- Pi got a new IP from DHCP
-
-**Solution:**
-- Check router DHCP lease table
-- Or scan network: `nmap -sn 192.168.1.0/24`
-- Look for device with hostname "raspberrypi" or MAC address of Pi
-
-## Quick Fixes
-
-### Option A: Fix Network Connection
-1. Connect Mac to same WiFi as Pi
-2. Check router settings for AP isolation
-3. Verify Pi's IP address hasn't changed
-
-### Option B: Enable SSH via Physical Access
-If you have HDMI/keyboard access to Pi:
-```bash
-sudo systemctl enable ssh
-sudo systemctl start ssh
-sudo ufw allow 22/tcp
-```
-
-### Option C: Deploy Manually
-Since tunnel works, deploy binary manually:
-
-1. **Copy binary to USB:**
+1. **Check if SSH is enabled:**
    ```bash
-   cp annas-mcp-linux-arm /Volumes/USBDRIVE/
+   sudo systemctl status ssh
+   sudo systemctl enable ssh
+   sudo systemctl start ssh
    ```
 
-2. **On Pi (via physical access or once SSH works):**
+2. **Check firewall:**
    ```bash
-   sudo cp /media/usb/annas-mcp-linux-arm /home/pi/annas-mcp-server/annas-mcp
-   sudo chmod +x /home/pi/annas-mcp-server/annas-mcp
-   sudo systemctl restart annas-mcp
+   sudo ufw status
+   sudo ufw allow 22/tcp
    ```
 
-### Option D: Use deploy-on-pi.sh Script
-If you can access Pi another way (VNC, physical access, etc.):
+3. **Verify IP address:**
+   ```bash
+   # On Pi
+   hostname -I
+
+   # Or scan from another machine
+   nmap -sn 192.168.1.0/24
+   ```
+
+4. **Check router settings:**
+   - Disable AP isolation / client isolation
+   - Ensure both devices are on the same network
+
+### MCP Server Issues
+
+**Server won't start:**
 ```bash
-# Copy deploy-on-pi.sh to Pi
-# Then run it directly on Pi:
-cd /home/pi/annas-mcp-server
-bash deploy-on-pi.sh
+# Check service status
+sudo systemctl status annas-mcp
+
+# View logs
+sudo journalctl -u annas-mcp -f
+
+# Check if port is in use
+sudo lsof -i :8081
 ```
 
-## Verify Fix
-After fixing network/SSH:
+**Server starts but doesn't respond:**
 ```bash
-ssh pi@192.168.1.201
-# Password: test
+# Test locally
+curl http://localhost:8081/health
+
+# Check if .env file exists and has correct values
+cat ~/annas-mcp-server/.env
 ```
 
-## Current Deployment Status
-- ✅ Code updated with `structuredContent` support
-- ✅ Binary built: `annas-mcp-linux-arm` (22MB)
-- ✅ Ready to deploy once SSH is accessible
-- ✅ Tunnel working, so Pi is functional
+### Tailscale Funnel Issues
 
-## Next Steps
-1. Fix network connectivity (most likely issue)
-2. Or deploy manually via USB
-3. Then test with: `./tests/test-repo-comprehensive.sh` or `./tests/test-end-to-end.sh`
+**Funnel not working:**
+```bash
+# Check Tailscale status
+tailscale status
 
+# Check Funnel status
+sudo tailscale funnel status
+
+# Restart Funnel
+sudo tailscale funnel --https=443 off
+sudo tailscale funnel --bg 8081
+```
+
+**Funnel not enabled on tailnet:**
+- Visit the URL shown when running `sudo tailscale funnel 8081`
+- Enable Funnel in your Tailscale admin console
+
+**Test Funnel externally:**
+```bash
+curl https://your-hostname.ts.net/health
+```
+
+### Build Issues
+
+**Go not found:**
+```bash
+export PATH=$PATH:/usr/local/go/bin
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+```
+
+**Build fails:**
+```bash
+# Check Go version
+go version
+
+# Clean and rebuild
+cd ~/annas-mcp-server
+go clean
+go build -o annas-mcp ./cmd/annas-mcp
+```
+
+## Useful Commands
+
+```bash
+# Server management
+sudo systemctl start annas-mcp
+sudo systemctl stop annas-mcp
+sudo systemctl restart annas-mcp
+sudo systemctl status annas-mcp
+
+# View logs
+sudo journalctl -u annas-mcp -f
+sudo journalctl -u annas-mcp --since "1 hour ago"
+
+# Tailscale
+tailscale status
+sudo tailscale funnel status
+sudo tailscale funnel --bg 8081
+
+# Test endpoints
+curl http://localhost:8081/health
+curl -X POST http://localhost:8081/mcp -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+## Deployment Checklist
+
+1. SSH into Pi
+2. Run deployment script: `bash ~/annas-mcp-server/scripts/deploy-on-pi.sh`
+3. Verify server is running: `sudo systemctl status annas-mcp`
+4. Verify Funnel is running: `sudo tailscale funnel status`
+5. Test externally: `curl https://your-hostname.ts.net/health`

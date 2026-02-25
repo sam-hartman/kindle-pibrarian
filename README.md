@@ -292,12 +292,10 @@ annas-mcp/
 │       └── version.txt         # Version string
 │
 ├── scripts/                      # Deployment and utility scripts
-│   ├── deploy-on-pi.sh         # Deploy directly on Raspberry Pi
-│   ├── deploy-with-tunnel.sh   # Deploy with Cloudflare tunnel
+│   ├── deploy-on-pi.sh         # Deploy directly on Raspberry Pi (with Tailscale)
 │   ├── raspberry-pi-setup.sh   # Systemd service configuration
 │   ├── setup-email-env.sh      # Email configuration helper
-│   ├── start-server.sh         # Start HTTP server (auto-detects email config)
-│   └── test-cloudflare-tunnel.sh # Test Cloudflare tunnel connection
+│   └── start-server.sh         # Start HTTP server (auto-detects email config)
 │
 ├── docs/                         # Documentation
 │   ├── LE_CHAT_SETUP.md        # Mistral Le Chat setup guide
@@ -353,7 +351,24 @@ annas-mcp/
 
 ## Deployment
 
-For deployment scripts and setup guides, see:
-- `scripts/deploy-on-pi.sh` - Deploy directly on Raspberry Pi
-- `scripts/deploy-with-tunnel.sh` - Deploy with Cloudflare tunnel from Mac
-- `scripts/raspberry-pi-setup.sh` - Systemd service setup
+### Raspberry Pi with Tailscale Funnel
+
+1. SSH into your Pi
+2. Run the deployment script:
+   ```bash
+   bash ~/annas-mcp-server/scripts/deploy-on-pi.sh
+   ```
+
+The script will:
+- Clone/update the repository
+- Build the Go binary
+- Set up systemd service
+- Install and configure Tailscale Funnel
+
+Your server will be available at: `https://your-pi-hostname.tailnet-name.ts.net/mcp`
+
+### Manual Setup
+
+For manual deployment, see:
+- `scripts/deploy-on-pi.sh` - Full deployment script
+- `scripts/raspberry-pi-setup.sh` - Systemd service setup only

@@ -39,7 +39,7 @@ The server will start on `http://localhost:8080`
 4. Select **Custom MCP Connector** tab
 5. Fill in:
    - **Connector Name**: `Anna's Archive MCP`
-   - **Connector Server**: `http://localhost:8080/mcp` (or use Cloudflare URL: `https://your-tunnel-url.trycloudflare.com/mcp`)
+   - **Connector Server**: `https://your-pi-hostname.tailnet-name.ts.net/mcp` (your Tailscale Funnel URL)
    - **Description**: (optional) `Search and download books from Anna's Archive`
    - **Authentication Method**: `No Authentication`
 6. Click **Connect**
@@ -51,6 +51,23 @@ The server will start on `http://localhost:8080`
 1. In a Le Chat conversation, click the **Tools** button
 2. Under **Connectors**, enable **Anna's Archive MCP**
 3. You can now ask Le Chat to search for books or download them!
+
+## Remote Access with Tailscale Funnel
+
+For Le Chat to access your server, you need to expose it to the internet. We use Tailscale Funnel:
+
+```bash
+# Install Tailscale (on your server/Pi)
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+
+# Enable Funnel
+sudo tailscale funnel --bg 8081
+```
+
+Your URL will be: `https://your-hostname.tailnet-name.ts.net`
+
+Use this URL in Le Chat: `https://your-hostname.tailnet-name.ts.net/mcp`
 
 ## Available Endpoints
 
@@ -99,17 +116,16 @@ curl -X POST http://localhost:8080/search \
 If Le Chat cannot connect:
 
 1. **Check the URL format**: Make sure you're using the full path with `/mcp`:
-   - ✅ Correct: `http://localhost:8080/mcp`
-   - ❌ Wrong: `http://localhost:8080`
+   - Correct: `https://your-hostname.ts.net/mcp`
+   - Wrong: `https://your-hostname.ts.net`
 
 2. **Test the endpoint manually**: Use the curl commands above to verify the server is responding correctly.
 
 3. **Check server logs**: The server logs all MCP requests. Look for any error messages when Le Chat tries to connect.
 
-4. **Using Cloudflare Tunnel**: If using a Cloudflare tunnel, make sure to:
-   - Use the full URL: `https://your-tunnel-url.trycloudflare.com/mcp`
-   - The tunnel must be running and forwarding to `http://localhost:8080`
-   - Test the Cloudflare URL with curl first to ensure it's accessible
+4. **Using Tailscale Funnel**: Make sure:
+   - Tailscale is connected: `tailscale status`
+   - Funnel is running: `tailscale funnel status`
+   - Test with curl: `curl https://your-hostname.ts.net/health`
 
 5. **CORS Issues**: The server has CORS enabled, but if you still see CORS errors, check that the server is running and accessible.
-

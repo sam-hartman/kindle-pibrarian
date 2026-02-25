@@ -1,6 +1,6 @@
 #!/bin/bash
-# Setup script to create systemd services for Raspberry Pi
-# Run this on your Raspberry Pi to make the server and tunnel start automatically
+# Setup script to create systemd service for Raspberry Pi
+# Run this on your Raspberry Pi to make the server start automatically
 
 set -e
 
@@ -11,15 +11,14 @@ if [ "$ACTUAL_USER" = "root" ]; then
 fi
 USER_HOME=$(eval echo ~$ACTUAL_USER)
 PROJECT_DIR="$USER_HOME/annas-mcp-server"
-CLOUDFLARED_PATH="/tmp/cloudflared"
 
-echo "Setting up systemd services for Anna's Archive MCP Server"
+echo "Setting up systemd service for Anna's Archive MCP Server"
 echo "Project directory: $PROJECT_DIR"
 echo "User: $ACTUAL_USER"
 echo ""
 
 # Check if running as root
-if [ "$EUID" -ne 0 ]; then 
+if [ "$EUID" -ne 0 ]; then
     echo "This script needs sudo privileges. Please run with sudo."
     exit 1
 fi
@@ -49,67 +48,32 @@ SyslogIdentifier=annas-mcp
 WantedBy=multi-user.target
 EOF
 
-# Create systemd service for Cloudflare tunnel
-echo "Creating Cloudflare tunnel service..."
-
-# Download cloudflared if not already present
-if [ ! -f "$CLOUDFLARED_PATH" ]; then
-    echo "Downloading cloudflared..."
-    wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm -O "$CLOUDFLARED_PATH"
-    chmod +x "$CLOUDFLARED_PATH"
-fi
-
-cat > /etc/systemd/system/cloudflared-tunnel.service << EOF
-[Unit]
-Description=Cloudflare Tunnel for Anna's Archive MCP
-After=network.target annas-mcp.service
-Requires=annas-mcp.service
-
-[Service]
-Type=simple
-User=$ACTUAL_USER
-ExecStart=$CLOUDFLARED_PATH tunnel --url http://localhost:8081
-Restart=always
-RestartSec=10
-
-# Logging
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=cloudflared-tunnel
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
 # Reload systemd
 echo "Reloading systemd..."
 systemctl daemon-reload
 
-# Enable services
-echo "Enabling services to start on boot..."
+# Enable service
+echo "Enabling service to start on boot..."
 systemctl enable annas-mcp.service
-systemctl enable cloudflared-tunnel.service
 
 echo ""
-echo "✅ Services created successfully!"
+echo "✅ Service created successfully!"
 echo ""
-echo "To start the services now:"
+echo "To start the service now:"
 echo "  sudo systemctl start annas-mcp"
-echo "  sudo systemctl start cloudflared-tunnel"
 echo ""
 echo "To check status:"
 echo "  sudo systemctl status annas-mcp"
-echo "  sudo systemctl status cloudflared-tunnel"
 echo ""
 echo "To view logs:"
 echo "  sudo journalctl -u annas-mcp -f"
-echo "  sudo journalctl -u cloudflared-tunnel -f"
 echo ""
-echo "To stop services:"
+echo "To stop service:"
 echo "  sudo systemctl stop annas-mcp"
-echo "  sudo systemctl stop cloudflared-tunnel"
 echo ""
 echo "To disable auto-start:"
 echo "  sudo systemctl disable annas-mcp"
-echo "  sudo systemctl disable cloudflared-tunnel"
+echo ""
+echo "For internet access, use Tailscale Funnel:"
+echo "  sudo tailscale funnel --bg 8081"
 

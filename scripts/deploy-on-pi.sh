@@ -9,11 +9,8 @@ set -e
 
 PI_HOME="$HOME"
 PROJECT_DIR="$PI_HOME/annas-mcp-server"
-TUNNEL_NAME="${TUNNEL_NAME:-annas-mcp}"
 
-# Load .env if it exists (will be loaded after PROJECT_DIR is set)
 # Default values
-CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
 ANNAS_SECRET_KEY="${ANNAS_SECRET_KEY:-}"
 SMTP_USER="${SMTP_USER:-}"
 SMTP_PASSWORD="${SMTP_PASSWORD:-}"
@@ -37,8 +34,6 @@ if [ -d annas-mcp-server ]; then
     git pull || echo "⚠️  Git pull failed, continuing with existing code..."
 else
     echo "Cloning repository..."
-    # Try SSH first, then HTTPS
-    git clone git@github.com:sam-hartman-mistral/annas-mcp-server.git 2>/dev/null || \
     git clone https://github.com/sam-hartman-mistral/annas-mcp-server.git 2>/dev/null || {
         echo "⚠️  Git clone failed. If repo exists, continuing..."
         mkdir -p annas-mcp-server
@@ -64,7 +59,7 @@ if ! command -v go >/dev/null 2>&1; then
         echo "⚠️  Unknown architecture, trying arm64..."
         GO_VERSION="go1.23.4.linux-arm64.tar.gz"
     fi
-    
+
     echo "Downloading $GO_VERSION..."
     wget -q "https://go.dev/dl/$GO_VERSION" -O /tmp/go.tar.gz
     sudo rm -rf /usr/local/go
@@ -81,7 +76,6 @@ export PATH=$PATH:/usr/local/go/bin
 
 # Build the application
 cd "$PROJECT_DIR"
-export PATH=$PATH:/usr/local/go/bin
 go build -o annas-mcp ./cmd/annas-mcp
 
 echo ""
@@ -111,9 +105,6 @@ SMTP_USER=your-email@gmail.com
 SMTP_PASSWORD=your-app-password
 FROM_EMAIL=your-email@gmail.com
 KINDLE_EMAIL=your-kindle-email@kindle.com
-
-# Cloudflare tunnel (optional, for deploy scripts)
-CLOUDFLARE_API_TOKEN=your-cloudflare-token
 ENVEOF
     echo ""
     echo "❌ Please edit $PROJECT_DIR/.env with your actual values before continuing!"
@@ -122,172 +113,63 @@ ENVEOF
 fi
 
 echo ""
-echo "📥 Step 4: Downloading cloudflared..."
-wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm -O /tmp/cloudflared
-chmod +x /tmp/cloudflared
-
-echo ""
-echo "🛑 Step 5: Stopping any existing services..."
-sudo systemctl stop annas-mcp cloudflared-tunnel 2>/dev/null || true
+echo "🛑 Step 4: Stopping any existing services..."
+sudo systemctl stop annas-mcp 2>/dev/null || true
 pkill -f annas-mcp || true
-pkill -f cloudflared || true
 sleep 2
 
 echo ""
-echo "🔐 Step 6: Setting up Cloudflare tunnel..."
-mkdir -p ~/.cloudflared
-
-# Try to create tunnel using cloudflared with API token
-echo "Creating tunnel '$TUNNEL_NAME'..."
-export CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN"
-TUNNEL_CREATE_OUTPUT=$(/tmp/cloudflared tunnel create "$TUNNEL_NAME" 2>&1 || true)
-
-echo "$TUNNEL_CREATE_OUTPUT"
-
-# Check if tunnel exists or was created
-TUNNEL_EXISTS=false
-if echo "$TUNNEL_CREATE_OUTPUT" | grep -q "already exists\|Created tunnel\|Tunnel created"; then
-    TUNNEL_EXISTS=true
-    echo "✅ Tunnel '$TUNNEL_NAME' exists or was created"
-elif echo "$TUNNEL_CREATE_OUTPUT" | grep -q "error\|Error\|ERROR"; then
-    echo "⚠️  Tunnel creation had issues, checking if it already exists..."
-    TUNNEL_LIST=$(/tmp/cloudflared tunnel list 2>&1 || echo "")
-    if echo "$TUNNEL_LIST" | grep -q "$TUNNEL_NAME"; then
-        TUNNEL_EXISTS=true
-        echo "✅ Tunnel '$TUNNEL_NAME' already exists"
-    fi
-fi
-
-# Get tunnel ID
-TUNNEL_ID=$(/tmp/cloudflared tunnel list 2>&1 | grep "$TUNNEL_NAME" | awk '{print $1}' | head -1 || echo "")
-
-if [ -z "$TUNNEL_ID" ]; then
-    # Try to get from credentials files
-    TUNNEL_ID=$(ls ~/.cloudflared/*.json 2>/dev/null | head -1 | xargs basename | sed 's/.json//' || echo "")
-fi
-
-if [ -z "$TUNNEL_ID" ] && [ "$TUNNEL_EXISTS" = true ]; then
-    echo "⚠️  Could not extract tunnel ID, but tunnel exists. Will use tunnel name instead."
-    TUNNEL_ID="$TUNNEL_NAME"
-fi
-
-if [ -z "$TUNNEL_ID" ]; then
-    echo "❌ Could not determine tunnel ID. Falling back to quick tunnel mode."
-    TUNNEL_MODE="quick"
-else
-    echo "Using Tunnel ID: $TUNNEL_ID"
-    TUNNEL_MODE="named"
-    
-    # Create config file for named tunnel
-    echo "Creating tunnel configuration..."
-    cat > ~/.cloudflared/config.yml << CONFEOF
-tunnel: $TUNNEL_ID
-credentials-file: $HOME/.cloudflared/${TUNNEL_ID}.json
-
-ingress:
-  - service: http://localhost:8081
-CONFEOF
-fi
+echo "🔧 Step 5: Setting up systemd service..."
+sudo bash "$PROJECT_DIR/scripts/raspberry-pi-setup.sh"
 
 echo ""
-echo "🔧 Step 7: Setting up systemd services..."
-# Run raspberry-pi-setup.sh to create MCP server service
-sudo bash "$PROJECT_DIR/raspberry-pi-setup.sh"
-
-# Update cloudflared-tunnel service based on tunnel mode
-if [ "$TUNNEL_MODE" = "named" ]; then
-    echo "Updating systemd service to use named tunnel..."
-    sudo bash -c "cat > /etc/systemd/system/cloudflared-tunnel.service << 'EOF'
-[Unit]
-Description=Cloudflare Tunnel for Anna's Archive MCP
-After=network.target annas-mcp.service
-Requires=annas-mcp.service
-
-[Service]
-Type=simple
-User=$USER
-Environment=\"CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}\"
-ExecStart=/tmp/cloudflared tunnel run $TUNNEL_ID
-Restart=always
-RestartSec=10
-
-# Logging
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=cloudflared-tunnel
-
-[Install]
-WantedBy=multi-user.target
-EOF"
-else
-    # Use quick tunnel mode
-    sudo bash -c "cat > /etc/systemd/system/cloudflared-tunnel.service << 'EOF'
-[Unit]
-Description=Cloudflare Tunnel for Anna's Archive MCP
-After=network.target annas-mcp.service
-Requires=annas-mcp.service
-
-[Service]
-Type=simple
-User=$USER
-ExecStart=/tmp/cloudflared tunnel --url http://localhost:8081
-Restart=always
-RestartSec=10
-
-# Logging
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=cloudflared-tunnel
-
-[Install]
-WantedBy=multi-user.target
-EOF"
+echo "📡 Step 6: Setting up Tailscale Funnel..."
+# Check if Tailscale is installed
+if ! command -v tailscale >/dev/null 2>&1; then
+    echo "Installing Tailscale..."
+    curl -fsSL https://tailscale.com/install.sh | sh
 fi
 
-# Reload systemd
-sudo systemctl daemon-reload
+# Check if Tailscale is connected
+if ! tailscale status >/dev/null 2>&1; then
+    echo ""
+    echo "⚠️  Tailscale is not connected. Please run:"
+    echo "   sudo tailscale up"
+    echo ""
+    echo "Then visit the URL shown to authenticate."
+    echo "After authenticating, run this script again."
+    exit 1
+fi
+
+# Enable Funnel
+echo "Enabling Tailscale Funnel on port 8081..."
+sudo tailscale funnel --bg 8081 2>/dev/null || {
+    echo ""
+    echo "⚠️  Funnel may need to be enabled on your tailnet."
+    echo "   Visit the URL shown above to enable it, then run this script again."
+    exit 1
+}
 
 echo ""
-echo "▶️  Step 8: Starting services..."
+echo "▶️  Step 7: Starting services..."
 sudo systemctl enable annas-mcp
-sudo systemctl enable cloudflared-tunnel
 sudo systemctl start annas-mcp
 sleep 3
-sudo systemctl start cloudflared-tunnel
-sleep 5
 
 echo ""
 echo "✅ Deployment complete!"
 echo ""
 echo "Checking server status..."
 sudo systemctl status annas-mcp --no-pager -l | head -15
-echo ""
-echo "Checking tunnel status..."
-sudo systemctl status cloudflared-tunnel --no-pager -l | head -15
 
 echo ""
-echo "🔍 Getting Cloudflare tunnel URL..."
-if [ "$TUNNEL_MODE" = "named" ]; then
-    echo "For named tunnel, check Cloudflare dashboard:"
-    echo "  https://one.dash.cloudflare.com -> Networks -> Tunnels -> $TUNNEL_NAME"
-    echo ""
-    echo "Or check tunnel info:"
-    export CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN"
-    /tmp/cloudflared tunnel info "$TUNNEL_ID" 2>&1 | head -20
-else
-    echo "Quick tunnel URL:"
-    sudo journalctl -u cloudflared-tunnel -n 50 --no-pager | grep 'trycloudflare.com' | tail -1
-fi
+echo "🔍 Tailscale Funnel URL:"
+sudo tailscale funnel status
 
 echo ""
 echo "📋 Useful commands:"
 echo "  Check server status: sudo systemctl status annas-mcp"
-echo "  Check tunnel status: sudo systemctl status cloudflared-tunnel"
+echo "  Check Funnel status: sudo tailscale funnel status"
 echo "  View server logs: sudo journalctl -u annas-mcp -f"
-echo "  View tunnel logs: sudo journalctl -u cloudflared-tunnel -f"
-if [ "$TUNNEL_MODE" = "named" ]; then
-    echo "  Get tunnel hostname: export CLOUDFLARE_API_TOKEN='${CLOUDFLARE_API_TOKEN}' && /tmp/cloudflared tunnel info $TUNNEL_ID"
-else
-    echo "  Get tunnel URL: sudo journalctl -u cloudflared-tunnel -n 50 | grep trycloudflare.com"
-fi
+echo "  Stop Funnel: sudo tailscale funnel --https=443 off"
 
