@@ -77,6 +77,11 @@ fi
 echo "Extracting..."
 tar -xf /tmp/annas-mcp.tar.xz --strip-components=1
 rm /tmp/annas-mcp.tar.xz
+
+# Rename binary to annas-mcp (goreleaser names it kindle-pibrarian)
+if [ -f "kindle-pibrarian" ]; then
+    mv kindle-pibrarian annas-mcp
+fi
 chmod +x annas-mcp
 
 echo "Binary installed to: $INSTALL_DIR/annas-mcp"
