@@ -73,6 +73,20 @@ const (
 	DownloadKindleDesc   = "Optional: Kindle email address to send the book to. If not specified, uses the default KINDLE_EMAIL from server configuration."
 )
 
+// SearchParams defines parameters for the search tool
+type SearchParams struct {
+	SearchTerm      string `json:"term" mcp:"Term to search for"`
+	PreferredFormat string `json:"format,omitempty" mcp:"Optional: Preferred format (epub, pdf, mobi). Defaults to epub for Kindle compatibility."`
+}
+
+// DownloadParams defines parameters for the download tool
+type DownloadParams struct {
+	BookHash    string `json:"hash" mcp:"MD5 hash of the book to download"`
+	Title       string `json:"title" mcp:"Book title, used for filename"`
+	Format      string `json:"format" mcp:"Book format, for example pdf or epub"`
+	KindleEmail string `json:"kindle_email,omitempty" mcp:"Optional Kindle email to send the book to. If not specified, uses the default configured KINDLE_EMAIL."`
+}
+
 // addToolsToServer adds the standard tools to an MCP server instance
 func addToolsToServer(server *mcp.Server) {
 	server.AddTools(
@@ -423,16 +437,7 @@ func StartMCPHTTPServer(port string) {
 
 	// MCP protocol endpoint (JSON-RPC 2.0)
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
-		// Set CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		
-		// Handle OPTIONS for CORS preflight
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
+		// CORS is handled by middleware
 		// Handle GET for discovery
 		if r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "application/json")

@@ -22,6 +22,11 @@ type Env struct {
 	KindleEmail  string `json:"kindle_email"`
 }
 
+// IsEmailConfigured returns true if all required email settings are present
+func (e *Env) IsEmailConfigured() bool {
+	return e.SMTPHost != "" && e.SMTPUser != "" && e.SMTPPassword != "" && e.FromEmail != ""
+}
+
 // loadEnvFile loads environment variables from a .env file
 // It reads key=value pairs and sets them in the environment if not already set
 func loadEnvFile(path string) error {

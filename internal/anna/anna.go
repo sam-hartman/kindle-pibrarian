@@ -28,6 +28,88 @@ const (
 	AnnasDownloadEndpoint = "https://annas-archive.li/dyn/api/fast_download.json?md5=%s&key=%s&domain_index=%d"
 )
 
+// Supported formats and languages
+var (
+	supportedFormats   = []string{"epub", "pdf", "mobi", "azw", "azw3"}
+	supportedLanguages = []string{"english", "spanish", "french", "german", "italian", "portuguese", "russian", "chinese", "japanese", "korean", "arabic", "dutch", "polish", "turkish"}
+	languageMap        = map[string]string{
+		"english": "English", "spanish": "Spanish", "french": "French",
+		"german": "German", "italian": "Italian", "portuguese": "Portuguese",
+		"russian": "Russian", "chinese": "Chinese", "japanese": "Japanese",
+		"korean": "Korean", "arabic": "Arabic", "dutch": "Dutch",
+		"polish": "Polish", "turkish": "Turkish", "en": "English",
+		"es": "Spanish", "fr": "French", "de": "German", "it": "Italian",
+		"pt": "Portuguese", "ru": "Russian", "zh": "Chinese", "ja": "Japanese",
+	}
+)
+
+// getMimeType returns the MIME type for a given format
+func getMimeType(format string) string {
+	switch strings.ToLower(format) {
+	case "pdf":
+		return "application/pdf"
+	case "epub":
+		return "application/epub+zip"
+	case "mobi":
+		return "application/x-mobipocket-ebook"
+	case "azw", "azw3":
+		return "application/vnd.amazon.ebook"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+// containsAny checks if string s contains any of the substrings
+func containsAny(s string, substrs []string) bool {
+	for _, substr := range substrs {
+		if strings.Contains(s, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// cleanTitle removes file paths and cleans up a book title
+func cleanTitle(title string) string {
+	if title == "" {
+		return ""
+	}
+	title = strings.TrimSpace(title)
+
+	// Extract filename from path (take part after last /)
+	if idx := strings.LastIndex(title, "/"); idx >= 0 && idx < len(title)-1 {
+		title = title[idx+1:]
+	}
+
+	// Clean up common patterns
+	title = strings.ReplaceAll(title, "\\", " ")
+	for _, prefix := range []string{"lgli/", "upload/", "nexusstc/", "!!", "zlib/"} {
+		title = strings.TrimPrefix(title, prefix)
+	}
+
+	// Remove file extensions
+	for _, ext := range []string{".epub", ".mobi", ".pdf", ".azw3", ".zip", ".nodrm"} {
+		if strings.HasSuffix(strings.ToLower(title), ext) {
+			title = title[:len(title)-len(ext)]
+			break
+		}
+	}
+
+	// Replace underscores, clean whitespace, take first line
+	title = strings.ReplaceAll(title, "_", " ")
+	title = strings.Join(strings.Fields(title), " ")
+	if idx := strings.Index(title, "\n"); idx > 0 {
+		title = title[:idx]
+	}
+
+	// Remove drive letters (e.g., "R:")
+	if len(title) > 2 && title[1] == ':' {
+		title = strings.TrimSpace(title[2:])
+	}
+
+	return strings.TrimSpace(title)
+}
+
 // SendFileToKindle sends file data to Kindle email address (exported for test email command)
 func SendFileToKindle(fileData []byte, filename, mimeType, subject, smtpHost, smtpPort, smtpUser, smtpPassword, fromEmail, kindleEmail string) error {
 	l := logger.GetLogger()
@@ -137,63 +219,34 @@ func sanitizeFilename(name string) string {
 
 // detectFileFormat detects the actual file format from Content-Type header and file content
 func detectFileFormat(contentType string, fileData []byte) (format string, mimeType string) {
-	// First, try to detect from Content-Type header
+	// Try to detect from Content-Type header first
 	if contentType != "" {
-		contentType = strings.ToLower(contentType)
-		if strings.Contains(contentType, "pdf") {
-			return "pdf", "application/pdf"
-		}
-		if strings.Contains(contentType, "epub") {
-			return "epub", "application/epub+zip"
-		}
-		if strings.Contains(contentType, "mobi") || strings.Contains(contentType, "mobipocket") {
-			return "mobi", "application/x-mobipocket-ebook"
-		}
-		if strings.Contains(contentType, "azw") {
-			return "azw3", "application/vnd.amazon.ebook"
-		}
-	}
-
-	// If Content-Type doesn't help, detect from file magic bytes
-	if len(fileData) >= 4 {
-		// PDF files start with "%PDF"
-		if len(fileData) >= 4 && string(fileData[0:4]) == "%PDF" {
-			return "pdf", "application/pdf"
-		}
-
-		// EPUB files are ZIP archives, start with "PK" (ZIP magic bytes)
-		if len(fileData) >= 2 && string(fileData[0:2]) == "PK" {
-			// Check if it's actually an EPUB by looking for mimetype file
-			// For simplicity, if it's a ZIP and we expected EPUB, assume EPUB
-			// Otherwise, we could check the ZIP contents
-			return "epub", "application/epub+zip"
-		}
-
-		// MOBI files can start with various headers
-		// Check for MOBI magic bytes: "BOOKMOBI" or "MOBI"
-		if len(fileData) >= 8 {
-			header := string(fileData[0:8])
-			if header == "BOOKMOBI" || header == "MOBI    " {
-				return "mobi", "application/x-mobipocket-ebook"
-			}
-		}
-		// Also check for MOBI at offset 60 (some MOBI files have different headers)
-		if len(fileData) >= 68 {
-			if string(fileData[60:68]) == "BOOKMOBI" {
-				return "mobi", "application/x-mobipocket-ebook"
-			}
-		}
-
-		// AZW files are similar to MOBI
-		if len(fileData) >= 8 {
-			header := string(fileData[0:8])
-			if header == "ITZEBX01" || header == "ITZEBX02" {
-				return "azw3", "application/vnd.amazon.ebook"
+		ct := strings.ToLower(contentType)
+		for _, fmt := range supportedFormats {
+			if strings.Contains(ct, fmt) {
+				return fmt, getMimeType(fmt)
 			}
 		}
 	}
 
-	// Default fallback
+	// Detect from file magic bytes
+	if len(fileData) >= 4 && string(fileData[0:4]) == "%PDF" {
+		return "pdf", getMimeType("pdf")
+	}
+	if len(fileData) >= 2 && string(fileData[0:2]) == "PK" {
+		return "epub", getMimeType("epub")
+	}
+	// MOBI: check at offset 60 (PalmDOC format) or offset 0
+	if len(fileData) >= 68 && string(fileData[60:68]) == "BOOKMOBI" {
+		return "mobi", getMimeType("mobi")
+	}
+	if len(fileData) >= 8 && (string(fileData[0:8]) == "BOOKMOBI" || string(fileData[0:8]) == "ITZEBX01" || string(fileData[0:8]) == "ITZEBX02") {
+		if string(fileData[0:8]) == "BOOKMOBI" {
+			return "mobi", getMimeType("mobi")
+		}
+		return "azw3", getMimeType("azw3")
+	}
+
 	return "unknown", "application/octet-stream"
 }
 
@@ -207,21 +260,10 @@ func extractMetaInformation(meta string) (language, format, size string) {
 	if len(parts) >= 2 {
 		// First part is often language
 		potentialLang := strings.TrimSpace(parts[0])
-		// Check if it looks like a language name
-		languageKeywords := map[string]string{
-			"english": "English", "spanish": "Spanish", "french": "French",
-			"german": "German", "italian": "Italian", "portuguese": "Portuguese",
-			"russian": "Russian", "chinese": "Chinese", "japanese": "Japanese",
-			"korean": "Korean", "arabic": "Arabic", "dutch": "Dutch",
-			"polish": "Polish", "turkish": "Turkish", "en": "English",
-			"es": "Spanish", "fr": "French", "de": "German", "it": "Italian",
-			"pt": "Portuguese", "ru": "Russian", "zh": "Chinese", "ja": "Japanese",
-		}
 		langLower := strings.ToLower(potentialLang)
-		if mappedLang, ok := languageKeywords[langLower]; ok {
+		if mappedLang, ok := languageMap[langLower]; ok {
 			language = mappedLang
 		} else if len(potentialLang) > 1 && len(potentialLang) < 20 {
-			// Might be a language name even if not in our map
 			language = potentialLang
 		}
 
@@ -511,89 +553,19 @@ func FindBookWithFormat(query, preferredFormat string) ([]*Book, error) {
 			}
 		}
 
-		// Clean up title - remove file paths and extract just the book title
-		if title != "" {
-			// Remove common file path patterns
-			title = strings.TrimSpace(title)
-
-			// Remove leading path components (e.g., "lgli/", "upload/", etc.)
-			// Try multiple times to remove nested paths
-			for i := 0; i < 5; i++ {
-				if idx := strings.LastIndex(title, "/"); idx >= 0 && idx < len(title)-1 {
-					potentialTitle := strings.TrimSpace(title[idx+1:])
-					// If the part after "/" looks like a title, use it
-					if len(potentialTitle) > 5 && !strings.HasPrefix(potentialTitle, "!!") {
-						title = potentialTitle
-					} else {
-						break
-					}
-				} else {
-					break
-				}
-			}
-
-			// Remove backslashes (Windows paths) and replace with spaces
-			title = strings.ReplaceAll(title, "\\", " ")
-
-			// Remove common path prefixes that might remain
-			pathPrefixes := []string{"lgli/", "upload/", "nexusstc/", "!!1", "!!"}
-			for _, prefix := range pathPrefixes {
-				if strings.HasPrefix(title, prefix) {
-					title = strings.TrimPrefix(title, prefix)
-					title = strings.TrimSpace(title)
-				}
-			}
-
-			// Remove file extensions from the end if they're part of the title
-			extensions := []string{".epub", ".mobi", ".pdf", ".azw3", ".zip", ".nodrm"}
-			for _, ext := range extensions {
-				if strings.HasSuffix(strings.ToLower(title), ext) {
-					title = strings.TrimSuffix(title, ext)
-					title = strings.TrimSuffix(title, strings.ToUpper(ext))
-					break
-				}
-			}
-
-			// Remove underscores and replace with spaces
-			title = strings.ReplaceAll(title, "_", " ")
-
-			// Clean up multiple spaces and special characters
-			title = strings.Join(strings.Fields(title), " ")
-
-			// Take only the first line if there are multiple lines
-			if idx := strings.Index(title, "\n"); idx > 0 {
-				title = strings.TrimSpace(title[:idx])
-			}
-
-			// Final cleanup: remove any remaining path-like patterns at the start
-			title = strings.TrimSpace(title)
-			if strings.Contains(title, ":") && strings.Index(title, ":") < 3 {
-				// Looks like a drive letter (e.g., "R:")
-				if parts := strings.SplitN(title, ":", 2); len(parts) == 2 {
-					title = strings.TrimSpace(parts[1])
-				}
-			}
-		}
+		// Clean up title
+		title = cleanTitle(title)
 
 		// Extract metadata - look for text containing format/language/size info
-		var metaText, authorsText, publisherText string
+		var metaText, authorsText string
 		containerText := strings.ToLower(container.Text())
+		sizeIndicators := []string{"mb", "kb", "gb", "bytes"}
 
 		// Look for format indicators in the container text
-		if strings.Contains(containerText, "epub") || strings.Contains(containerText, "pdf") ||
-			strings.Contains(containerText, "mobi") || strings.Contains(containerText, "azw") {
-			// Find the div/span that contains this info
+		if containsAny(containerText, supportedFormats) {
 			container.Find("div, span").Each(func(i int, s *goquery.Selection) {
 				text := strings.ToLower(strings.TrimSpace(s.Text()))
-				// Look for metadata strings that contain format, language, or size info
-				if (strings.Contains(text, "epub") || strings.Contains(text, "pdf") ||
-					strings.Contains(text, "mobi") || strings.Contains(text, "azw") ||
-					strings.Contains(text, "english") || strings.Contains(text, "spanish") ||
-					strings.Contains(text, "french") || strings.Contains(text, "german") ||
-					strings.Contains(text, "mb") || strings.Contains(text, "kb") ||
-					strings.Contains(text, "gb") || strings.Contains(text, "bytes")) &&
-					len(text) < 500 {
-					// Prefer shorter, more specific metadata strings
+				if (containsAny(text, supportedFormats) || containsAny(text, supportedLanguages) || containsAny(text, sizeIndicators)) && len(text) < 500 {
 					if metaText == "" || (len(text) < len(metaText) && strings.Contains(text, ",")) {
 						metaText = strings.TrimSpace(s.Text())
 					}
@@ -602,10 +574,8 @@ func FindBookWithFormat(query, preferredFormat string) ([]*Book, error) {
 		}
 
 		// Also look for language indicators more broadly
-		languageKeywords := []string{"english", "spanish", "french", "german", "italian", "portuguese",
-			"russian", "chinese", "japanese", "korean", "arabic", "dutch", "polish", "turkish"}
 		if metaText == "" {
-			for _, lang := range languageKeywords {
+			for _, lang := range supportedLanguages {
 				if strings.Contains(containerText, lang) {
 					container.Find("div, span").Each(func(i int, s *goquery.Selection) {
 						text := strings.ToLower(strings.TrimSpace(s.Text()))
@@ -681,14 +651,13 @@ func FindBookWithFormat(query, preferredFormat string) ([]*Book, error) {
 		}
 
 		book := &Book{
-			Language:  strings.TrimSpace(language),
-			Format:    strings.TrimSpace(formatTrimmed),
-			Size:      strings.TrimSpace(size),
-			Title:     title,
-			Publisher: strings.TrimSpace(publisherText),
-			Authors:   strings.TrimSpace(authorsText),
-			URL:       e.Request.AbsoluteURL(link),
-			Hash:      hash,
+			Language: strings.TrimSpace(language),
+			Format:   strings.TrimSpace(formatTrimmed),
+			Size:     strings.TrimSpace(size),
+			Title:    title,
+			Authors:  strings.TrimSpace(authorsText),
+			URL:      e.Request.AbsoluteURL(link),
+			Hash:     hash,
 		}
 
 		// Only add if we have at least a hash
@@ -845,37 +814,10 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 
 	// Use detected format if available, otherwise fall back to search result format
 	format := actualFormat
-	var mimeType string
 	if format == "unknown" {
 		format = b.Format
-		// Determine MIME type based on format if detection failed
-		switch strings.ToLower(b.Format) {
-		case "pdf":
-			mimeType = "application/pdf"
-		case "epub":
-			mimeType = "application/epub+zip"
-		case "mobi":
-			mimeType = "application/x-mobipocket-ebook"
-		case "azw", "azw3":
-			mimeType = "application/vnd.amazon.ebook"
-		default:
-			mimeType = "application/octet-stream"
-		}
-	} else {
-		// Set MIME type based on detected format
-		switch format {
-		case "pdf":
-			mimeType = "application/pdf"
-		case "epub":
-			mimeType = "application/epub+zip"
-		case "mobi":
-			mimeType = "application/x-mobipocket-ebook"
-		case "azw", "azw3":
-			mimeType = "application/vnd.amazon.ebook"
-		default:
-			mimeType = "application/octet-stream"
-		}
 	}
+	mimeType := getMimeType(format)
 
 	// Kindle email service doesn't accept MOBI files - only PDF, EPUB, DOC, DOCX, HTML, RTF, TXT
 	// If we detect MOBI, we should warn and potentially convert or skip email
@@ -918,11 +860,3 @@ func (b *Book) String() string {
 		b.Title, b.Authors, b.Publisher, b.Language, b.Format, b.Size, b.URL, b.Hash)
 }
 
-func (b *Book) ToJSON() (string, error) {
-	data, err := json.MarshalIndent(b, "", "  ")
-	if err != nil {
-		return "", err
-	}
-
-	return string(data), nil
-}
