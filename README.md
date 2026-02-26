@@ -51,7 +51,7 @@ For MCP server functionality, you also need an MCP client, such as:
 
 ## Quick Start
 
-### Option A: One-Line Install (Recommended)
+### One-Line Install (Recommended)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sam-hartman/kindle-pibrarian/main/install.sh | bash
@@ -63,42 +63,24 @@ This will:
 - Set up systemd service
 - Install and configure Tailscale Funnel
 
-### Option B: Build from Source
+After install, skip to [Setting Up Kindle Email](#setting-up-kindle-email-optional) if you want to send books to your Kindle.
+
+### Build from Source (Alternative)
 
 ```bash
 git clone https://github.com/sam-hartman/kindle-pibrarian.git
 cd kindle-pibrarian
 go build -o annas-mcp ./cmd/annas-mcp
+
+# Configure
+cp .env.example .env
+nano .env  # Add your ANNAS_SECRET_KEY
+
+# Start the server
+./annas-mcp http --port 8080
 ```
 
-### 2. Configure
-
-Create a `.env` file (see `.env.example` for template):
-
-```bash
-# Copy the example if it exists, or create manually
-cp .env.example .env 2>/dev/null || touch .env
-```
-
-Edit `.env` and fill in your values:
-
-```bash
-# Required: Anna's Archive API key
-ANNAS_SECRET_KEY=your-api-key-here
-
-# Optional: Download path (defaults to temp directory)
-ANNAS_DOWNLOAD_PATH=/path/to/downloads
-
-# Optional: Email settings for Kindle (see detailed instructions below)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your-email@gmail.com
-SMTP_PASSWORD=your-app-password
-FROM_EMAIL=your-email@gmail.com
-KINDLE_EMAIL=your-kindle-email@kindle.com
-```
-
-### 2.1. Setting Up Kindle Email (Optional)
+## Setting Up Kindle Email (Optional)
 
 If you want to email books directly to your Kindle, follow these steps:
 
@@ -155,25 +137,9 @@ FROM_EMAIL=your-email@gmail.com    # Must match the whitelisted email
 KINDLE_EMAIL=yourname_123@kindle.com  # Your Kindle email from Step 2
 ```
 
-### 3. Start the Server
+## Connect Your MCP Client
 
-**Option A: Using the convenience script (recommended)**
-
-```bash
-./scripts/start-server.sh
-```
-
-**Option B: Direct command**
-
-```bash
-./annas-mcp http --port 8080
-```
-
-The server will start on `http://localhost:8080`
-
-### 4. Connect Your MCP Client
-
-#### For Mistral Le Chat
+### For Mistral Le Chat
 
 See [docs/LE_CHAT_SETUP.md](docs/LE_CHAT_SETUP.md) for detailed instructions.
 
@@ -184,7 +150,7 @@ Quick setup:
 4. Set **Authentication Method** to "None" (or "API Token" if required)
 5. Click Create
 
-#### For Claude Desktop
+### For Claude Desktop
 
 Add to your MCP configuration file:
 
@@ -296,8 +262,7 @@ annas-mcp/
 │   ├── modes/                   # Application modes (MCP, CLI, HTTP)
 │   │   ├── mcpserver.go        # MCP server implementation
 │   │   ├── cli.go              # CLI command handlers
-│   │   ├── env.go              # Environment variable loading
-│   │   └── params.go           # Tool parameter definitions
+│   │   └── env.go              # Environment variable loading
 │   └── version/                 # Version management
 │       ├── version.go          # Version retrieval
 │       └── version.txt         # Version string

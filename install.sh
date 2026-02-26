@@ -97,7 +97,7 @@ if [ ! -f "$INSTALL_DIR/.env" ]; then
     echo "You need an Anna's Archive API key."
     echo "Get one at: https://annas-archive.li/faq#api"
     echo ""
-    read -p "Enter your API key (or press Enter to skip): " ANNAS_KEY
+    read -p "Enter your API key (or press Enter to skip): " ANNAS_KEY </dev/tty
 
     # Create .env
     cat > "$INSTALL_DIR/.env" << EOF
@@ -205,7 +205,7 @@ echo "Server status:"
 sudo systemctl status annas-mcp --no-pager | head -5
 echo ""
 echo "Your MCP URL (use this in Le Chat):"
-FUNNEL_URL=$(tailscale funnel status 2>/dev/null | grep -oP 'https://[a-z0-9.-]+\.ts\.net' | head -1)
+FUNNEL_URL=$(tailscale funnel status 2>/dev/null | grep -oE 'https://[a-z0-9.-]+\.ts\.net' | head -1)
 if [ -n "$FUNNEL_URL" ]; then
     echo "  ${FUNNEL_URL}/mcp"
 else
