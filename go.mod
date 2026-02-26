@@ -1,4 +1,4 @@
-module github.com/sam-hartman-mistral/annas-mcp-server
+module github.com/sam-hartman/kindle-pibrarian
 
 go 1.23.4
 

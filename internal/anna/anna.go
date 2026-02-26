@@ -19,7 +19,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	colly "github.com/gocolly/colly/v2"
-	"github.com/sam-hartman-mistral/annas-mcp-server/internal/logger"
+	"github.com/sam-hartman/kindle-pibrarian/internal/logger"
 	"go.uber.org/zap"
 )
 

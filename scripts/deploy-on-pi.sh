@@ -34,7 +34,7 @@ if [ -d annas-mcp-server ]; then
     git pull || echo "⚠️  Git pull failed, continuing with existing code..."
 else
     echo "Cloning repository..."
-    git clone https://github.com/sam-hartman-mistral/annas-mcp-server.git 2>/dev/null || {
+    git clone https://github.com/sam-hartman/kindle-pibrarian.git 2>/dev/null || {
         echo "⚠️  Git clone failed. If repo exists, continuing..."
         mkdir -p annas-mcp-server
     }

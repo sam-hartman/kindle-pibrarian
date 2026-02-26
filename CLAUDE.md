@@ -1,7 +1,9 @@
-# Claude Instructions for annas-mcp-server
+# Claude Instructions for kindle-pibrarian
 
 ## Project Overview
 MCP server for searching and downloading books from Anna's Archive, with Kindle email support. Deployed on Raspberry Pi with Tailscale Funnel for remote access.
+
+**Repository:** https://github.com/sam-hartman/kindle-pibrarian
 
 ## Key Files
 - `internal/anna/anna.go` - Core search/download/email logic
@@ -39,26 +41,21 @@ git push --tags
 - Tailscale setup process changes
 - Repository URL changes
 
-## TODO: Finish One-Liner Installer Setup
-**Status**: GitHub Actions workflow is set up and working. Releases (v1.0.0, v1.0.1) have been built.
+## TODO: Test and Release
+**Status**: Repository moved to `sam-hartman/kindle-pibrarian`. All import paths updated.
 
 **What's left**:
-1. Move repo to personal GitHub account (currently on `sam-hartman-mistral`)
-2. Make repo **public** (required for one-liner to work without auth)
-3. Update these files with new repo URL:
-   - `go.mod` - module path
-   - `install.sh` - REPO variable at top
-   - `README.md` - all GitHub URLs
-   - All import paths in Go files (use grep for old org name)
-4. Test the one-liner:
+1. Make repo **public** (required for one-liner to work without auth)
+2. Test the one-liner:
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/NEW_USER/annas-mcp-server/main/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/sam-hartman/kindle-pibrarian/main/install.sh | bash
    ```
+3. Tag a new release (`git tag v1.0.2 && git push --tags`)
 
 **Why public?** The one-liner uses GitHub's public API to fetch releases. Private repos require authentication tokens.
 
 ## Important Reminders
-1. **Module path may change** - Repo will move to different GitHub org. When that happens, update `go.mod` and all import paths.
+1. **Module path** - Current: `github.com/sam-hartman/kindle-pibrarian`
 
 2. **Tailscale Funnel URL** - Current: `https://raspberrypi.tailddbc27.ts.net`
 

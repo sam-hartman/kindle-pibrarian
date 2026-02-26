@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sam-hartman-mistral/annas-mcp-server/internal/logger"
+	"github.com/sam-hartman/kindle-pibrarian/internal/logger"
 	"go.uber.org/zap"
 )
 

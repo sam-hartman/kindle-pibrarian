@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/sam-hartman-mistral/annas-mcp-server/internal/modes"
+	"github.com/sam-hartman/kindle-pibrarian/internal/modes"
 )
 
 func main() {

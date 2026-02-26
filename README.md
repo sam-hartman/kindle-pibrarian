@@ -54,7 +54,7 @@ For MCP server functionality, you also need an MCP client, such as:
 ### Option A: One-Line Install (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sam-hartman-mistral/annas-mcp-server/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sam-hartman/kindle-pibrarian/main/install.sh | bash
 ```
 
 This will:
@@ -66,8 +66,8 @@ This will:
 ### Option B: Build from Source
 
 ```bash
-git clone https://github.com/sam-hartman-mistral/annas-mcp-server.git
-cd annas-mcp-server
+git clone https://github.com/sam-hartman/kindle-pibrarian.git
+cd kindle-pibrarian
 go build -o annas-mcp ./cmd/annas-mcp
 ```
 

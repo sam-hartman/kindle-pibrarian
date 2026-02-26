@@ -1,6 +1,6 @@
 #!/bin/bash
 # One-liner installer for Anna's Archive MCP Server
-# Usage: curl -fsSL https://raw.githubusercontent.com/sam-hartman-mistral/annas-mcp-server/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/sam-hartman/kindle-pibrarian/main/install.sh | bash
 #
 # This script:
 # 1. Downloads pre-built binary from GitHub Releases
@@ -10,7 +10,7 @@
 
 set -e
 
-REPO="sam-hartman-mistral/annas-mcp-server"
+REPO="sam-hartman/kindle-pibrarian"
 INSTALL_DIR="$HOME/annas-mcp-server"
 
 echo "=============================================="

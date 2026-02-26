@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/fang"
-	"github.com/sam-hartman-mistral/annas-mcp-server/internal/anna"
-	"github.com/sam-hartman-mistral/annas-mcp-server/internal/logger"
-	"github.com/sam-hartman-mistral/annas-mcp-server/internal/version"
+	"github.com/sam-hartman/kindle-pibrarian/internal/anna"
+	"github.com/sam-hartman/kindle-pibrarian/internal/logger"
+	"github.com/sam-hartman/kindle-pibrarian/internal/version"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
