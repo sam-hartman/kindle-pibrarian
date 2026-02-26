@@ -2,11 +2,7 @@
 # One-liner installer for Anna's Archive MCP Server
 # Usage: curl -fsSL https://raw.githubusercontent.com/sam-hartman/kindle-pibrarian/main/install.sh | bash
 #
-# This script:
-# 1. Downloads pre-built binary from GitHub Releases
-# 2. Creates directory and .env file
-# 3. Sets up systemd service
-# 4. Installs Tailscale and configures Funnel
+# Works on both Linux (Raspberry Pi, Ubuntu, etc.) and macOS
 
 set -e
 
@@ -24,7 +20,8 @@ if [ "$EUID" -eq 0 ]; then
     exit 1
 fi
 
-# Detect architecture
+# Detect OS and architecture
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 case $ARCH in
     x86_64)
@@ -42,7 +39,6 @@ case $ARCH in
         ;;
 esac
 
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 echo "Detected: ${OS}/${ARCH_NAME}"
 
 # Get latest release version
@@ -58,7 +54,7 @@ fi
 echo "Version: $LATEST_VERSION"
 
 # Download binary
-ARCHIVE_NAME="annas-mcp-server_${LATEST_VERSION#v}_${OS}_${ARCH_NAME}.tar.xz"
+ARCHIVE_NAME="kindle-pibrarian_${LATEST_VERSION#v}_${OS}_${ARCH_NAME}.tar.xz"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST_VERSION}/${ARCHIVE_NAME}"
 
 echo ""
@@ -72,7 +68,7 @@ if ! curl -fsSL "$DOWNLOAD_URL" -o /tmp/annas-mcp.tar.xz; then
     echo ""
     echo "Alternative: Build from source"
     echo "  git clone https://github.com/${REPO}.git"
-    echo "  cd annas-mcp-server"
+    echo "  cd kindle-pibrarian"
     echo "  go build -o annas-mcp ./cmd/annas-mcp"
     exit 1
 fi
@@ -110,7 +106,6 @@ ANNAS_SECRET_KEY=${ANNAS_KEY:-your-api-key-here}
 ANNAS_DOWNLOAD_PATH=$HOME/Downloads/Anna's Archive
 
 # Optional: Email to Kindle (configure later if needed)
-# See docs/KINDLE_EMAIL_SETUP.md for instructions
 #SMTP_HOST=smtp.gmail.com
 #SMTP_PORT=587
 #SMTP_USER=your-email@gmail.com
@@ -126,14 +121,62 @@ EOF
     fi
 fi
 
-# Set up systemd service
+# Set up service based on OS
 echo ""
 echo "=============================================="
-echo "  Setting up systemd service"
+if [ "$OS" = "darwin" ]; then
+    echo "  Setting up launchd service (macOS)"
+else
+    echo "  Setting up systemd service (Linux)"
+fi
 echo "=============================================="
 echo ""
 
-sudo tee /etc/systemd/system/annas-mcp.service > /dev/null << EOF
+if [ "$OS" = "darwin" ]; then
+    # macOS: use launchd
+    PLIST_PATH="$HOME/Library/LaunchAgents/com.annas-mcp.plist"
+    mkdir -p "$HOME/Library/LaunchAgents"
+
+    cat > "$PLIST_PATH" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.annas-mcp</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${INSTALL_DIR}/annas-mcp</string>
+        <string>http</string>
+        <string>--port</string>
+        <string>8081</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>${INSTALL_DIR}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>${HOME}</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${INSTALL_DIR}/annas-mcp.log</string>
+    <key>StandardErrorPath</key>
+    <string>${INSTALL_DIR}/annas-mcp.log</string>
+</dict>
+</plist>
+EOF
+
+    # Load the service
+    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    launchctl load "$PLIST_PATH"
+    echo "Service started!"
+else
+    # Linux: use systemd
+    sudo tee /etc/systemd/system/annas-mcp.service > /dev/null << EOF
 [Unit]
 Description=Anna's Archive MCP Server
 After=network.target
@@ -155,11 +198,11 @@ SyslogIdentifier=annas-mcp
 WantedBy=multi-user.target
 EOF
 
-sudo systemctl daemon-reload
-sudo systemctl enable annas-mcp
-sudo systemctl start annas-mcp
-
-echo "Service started!"
+    sudo systemctl daemon-reload
+    sudo systemctl enable annas-mcp
+    sudo systemctl start annas-mcp
+    echo "Service started!"
+fi
 
 # Tailscale setup
 echo ""
@@ -170,29 +213,51 @@ echo ""
 
 if ! command -v tailscale >/dev/null 2>&1; then
     echo "Installing Tailscale..."
-    curl -fsSL https://tailscale.com/install.sh | sh
+    if [ "$OS" = "darwin" ]; then
+        echo "Please install Tailscale from: https://tailscale.com/download/mac"
+        echo "Or via Homebrew: brew install --cask tailscale"
+        echo ""
+        echo "After installing, run this script again."
+        exit 0
+    else
+        curl -fsSL https://tailscale.com/install.sh | sh
+    fi
 fi
 
 # Check if Tailscale is connected
 if ! tailscale status >/dev/null 2>&1; then
     echo ""
     echo "Tailscale needs authentication."
-    echo "Running 'sudo tailscale up'..."
-    echo ""
-    sudo tailscale up
+    if [ "$OS" = "darwin" ]; then
+        echo "Please open Tailscale app and sign in."
+        echo "Then run: tailscale funnel 8081"
+    else
+        echo "Running 'sudo tailscale up'..."
+        sudo tailscale up
+    fi
 fi
 
 # Enable Funnel
 echo ""
 echo "Enabling Tailscale Funnel..."
-if sudo tailscale funnel --bg 8081 2>&1 | grep -q "not enabled"; then
-    echo ""
-    echo "Funnel needs to be enabled on your tailnet."
-    echo "Visit the URL above to enable it, then run:"
-    echo "  sudo tailscale funnel --bg 8081"
+if [ "$OS" = "darwin" ]; then
+    # macOS doesn't need sudo for tailscale
+    if tailscale funnel 8081 2>&1 | grep -q "not enabled"; then
+        echo ""
+        echo "Funnel needs to be enabled on your tailnet."
+        echo "Visit: https://login.tailscale.com/admin/dns"
+        echo "Then run: tailscale funnel 8081"
+    fi
 else
-    echo ""
-    sudo tailscale funnel status
+    if sudo tailscale funnel --bg 8081 2>&1 | grep -q "not enabled"; then
+        echo ""
+        echo "Funnel needs to be enabled on your tailnet."
+        echo "Visit the URL above to enable it, then run:"
+        echo "  sudo tailscale funnel --bg 8081"
+    else
+        echo ""
+        sudo tailscale funnel status
+    fi
 fi
 
 # Done
@@ -201,20 +266,45 @@ echo "=============================================="
 echo "  Installation Complete!"
 echo "=============================================="
 echo ""
-echo "Server status:"
-sudo systemctl status annas-mcp --no-pager | head -5
-echo ""
-echo "Your MCP URL (use this in Le Chat):"
-FUNNEL_URL=$(tailscale funnel status 2>/dev/null | grep -oE 'https://[a-z0-9.-]+\.ts\.net' | head -1)
-if [ -n "$FUNNEL_URL" ]; then
-    echo "  ${FUNNEL_URL}/mcp"
+
+if [ "$OS" = "darwin" ]; then
+    echo "Server status:"
+    if launchctl list | grep -q "com.annas-mcp"; then
+        echo "  Running"
+    else
+        echo "  Not running"
+    fi
+    echo ""
+    echo "Your MCP URL (use this in Le Chat):"
+    FUNNEL_URL=$(tailscale funnel status 2>/dev/null | grep -oE 'https://[a-z0-9.-]+\.ts\.net' | head -1)
+    if [ -n "$FUNNEL_URL" ]; then
+        echo "  ${FUNNEL_URL}/mcp"
+    else
+        echo "  (Run 'tailscale funnel 8081' to get your URL)"
+    fi
+    echo ""
+    echo "Useful commands:"
+    echo "  View logs:      tail -f $INSTALL_DIR/annas-mcp.log"
+    echo "  Restart:        launchctl kickstart -k gui/\$(id -u)/com.annas-mcp"
+    echo "  Stop:           launchctl unload ~/Library/LaunchAgents/com.annas-mcp.plist"
+    echo "  Edit config:    nano $INSTALL_DIR/.env"
+    echo "  Funnel status:  tailscale funnel status"
 else
-    echo "  (Funnel URL will appear after enabling Funnel)"
+    echo "Server status:"
+    sudo systemctl status annas-mcp --no-pager | head -5
+    echo ""
+    echo "Your MCP URL (use this in Le Chat):"
+    FUNNEL_URL=$(tailscale funnel status 2>/dev/null | grep -oE 'https://[a-z0-9.-]+\.ts\.net' | head -1)
+    if [ -n "$FUNNEL_URL" ]; then
+        echo "  ${FUNNEL_URL}/mcp"
+    else
+        echo "  (Funnel URL will appear after enabling Funnel)"
+    fi
+    echo ""
+    echo "Useful commands:"
+    echo "  View logs:      sudo journalctl -u annas-mcp -f"
+    echo "  Restart:        sudo systemctl restart annas-mcp"
+    echo "  Edit config:    nano $INSTALL_DIR/.env"
+    echo "  Funnel status:  sudo tailscale funnel status"
 fi
-echo ""
-echo "Useful commands:"
-echo "  View logs:      sudo journalctl -u annas-mcp -f"
-echo "  Restart:        sudo systemctl restart annas-mcp"
-echo "  Edit config:    nano $INSTALL_DIR/.env"
-echo "  Funnel status:  sudo tailscale funnel status"
 echo ""

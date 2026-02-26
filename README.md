@@ -53,15 +53,17 @@ For MCP server functionality, you also need an MCP client, such as:
 
 ### One-Line Install (Recommended)
 
+Works on **macOS** and **Linux** (Raspberry Pi, Ubuntu, etc.):
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sam-hartman/kindle-pibrarian/main/install.sh | bash
 ```
 
 This will:
-- Download the pre-built binary
+- Download the pre-built binary for your platform
 - Prompt for your API key
-- Set up systemd service
-- Install and configure Tailscale Funnel
+- Set up auto-start service (launchd on Mac, systemd on Linux)
+- Install and configure Tailscale Funnel for remote access
 
 After install, skip to [Setting Up Kindle Email](#setting-up-kindle-email-optional) if you want to send books to your Kindle.
 
