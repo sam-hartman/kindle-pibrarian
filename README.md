@@ -270,14 +270,12 @@ annas-mcp/
 ├── scripts/                      # Deployment and utility scripts
 │   ├── deploy-on-pi.sh         # Deploy directly on Raspberry Pi (with Tailscale)
 │   ├── raspberry-pi-setup.sh   # Systemd service configuration
-│   ├── setup-email-env.sh      # Email configuration helper
 │   └── start-server.sh         # Start HTTP server (auto-detects email config)
 │
 ├── docs/                         # Documentation
 │   ├── LE_CHAT_SETUP.md        # Mistral Le Chat setup guide
 │   ├── KINDLE_EMAIL_SETUP.md   # Kindle email configuration
 │   ├── PI_TROUBLESHOOTING.md   # Raspberry Pi troubleshooting
-│   └── PROJECT_ORGANIZATION.md # File organization standards
 │
 ├── tests/                        # Test scripts and utilities
 │   ├── test-repo-comprehensive.sh  # Comprehensive test suite
