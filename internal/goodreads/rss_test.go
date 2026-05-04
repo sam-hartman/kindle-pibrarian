@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 const sampleRSS = `<?xml version="1.0" encoding="UTF-8"?>
@@ -76,5 +77,27 @@ func TestFetchShelf_Caps100(t *testing.T) {
 	}
 	if len(got) != 100 {
 		t.Errorf("len(got) = %d, want 100", len(got))
+	}
+}
+
+func TestFetchShelf_CachesAcrossCalls(t *testing.T) {
+	shelfCacheMu.Lock()
+	shelfCache["99999:to-read"] = cacheEntry{
+		books:   []ShelfBook{{Title: "Cached"}},
+		expires: time.Now().Add(5 * time.Minute),
+	}
+	shelfCacheMu.Unlock()
+	t.Cleanup(func() {
+		shelfCacheMu.Lock()
+		delete(shelfCache, "99999:to-read")
+		shelfCacheMu.Unlock()
+	})
+
+	got, err := FetchShelf("99999", "to-read")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].Title != "Cached" {
+		t.Errorf("got %+v, want one cached book", got)
 	}
 }
