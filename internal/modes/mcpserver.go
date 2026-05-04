@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sam-hartman/kindle-pibrarian/internal/anna"
+	"github.com/sam-hartman/kindle-pibrarian/internal/goodreads"
 	"github.com/sam-hartman/kindle-pibrarian/internal/logger"
 	"github.com/sam-hartman/kindle-pibrarian/internal/version"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -651,6 +652,56 @@ func StartMCPHTTPServer(port string) {
 		json.NewEncoder(w).Encode(jsonRPCResp)
 	})
 
+	// POST /goodreads/resolve
+	mux.HandleFunc("/goodreads/resolve", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Input string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		got, err := goodreads.ResolveUserID(body.Input)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(got)
+	})
+
+	// GET /goodreads/to-read?user_id=X&shelf=to-read
+	mux.HandleFunc("/goodreads/to-read", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		userID := r.URL.Query().Get("user_id")
+		if userID == "" {
+			http.Error(w, "user_id required", http.StatusBadRequest)
+			return
+		}
+		shelf := r.URL.Query().Get("shelf")
+		if shelf == "" {
+			shelf = "to-read"
+		}
+		books, err := goodreads.FetchShelf(userID, shelf)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"items": books})
+	})
+
 	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -670,19 +721,9 @@ func StartMCPHTTPServer(port string) {
 		})
 	})
 
-	// CORS middleware
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		mux.ServeHTTP(w, r)
-	})
+	// Compose middleware: CORS (outermost, sets headers + handles preflight)
+	// wraps passcode auth (no-op when WEB_PASSCODE is unset).
+	handler := WithCORS(RequirePasscode(mux))
 
 	addr := ":" + port
 	l.Info("MCP HTTP server listening", zap.String("address", addr))
