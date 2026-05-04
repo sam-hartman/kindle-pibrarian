@@ -75,3 +75,32 @@ func TestResolveUserID_UsernameRedirect(t *testing.T) {
 		t.Errorf("DisplayName = %q, want %q", got.DisplayName, "Jane Doe")
 	}
 }
+
+func TestResolveUserID_SearchFallback(t *testing.T) {
+	html := `<html><body>
+		<div class="result"><a class="userReview" href="/user/show/9876-found-person">Found Person</a></div>
+	</body></html>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/search" {
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte(html))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	got, err := searchPeopleAt(srv.URL, "found person")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.UserID != "9876" {
+		t.Errorf("UserID = %q, want 9876", got.UserID)
+	}
+	if got.Confidence != 0.5 {
+		t.Errorf("Confidence = %v, want 0.5", got.Confidence)
+	}
+	if got.DisplayName != "Found Person" {
+		t.Errorf("DisplayName = %q, want %q", got.DisplayName, "Found Person")
+	}
+}

@@ -3,7 +3,9 @@ package goodreads
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"unicode"
@@ -49,7 +51,46 @@ func ResolveUserID(input string) (*ResolvedUser, error) {
 	if u, err := resolveUsernameAt(goodreadsBase, input); err == nil {
 		return u, nil
 	}
+	// Fallback: low-confidence people search.
+	if u, err := searchPeopleAt(goodreadsBase, input); err == nil {
+		return u, nil
+	}
 	return nil, errors.New("could not resolve to a Goodreads user")
+}
+
+var searchUserRe = regexp.MustCompile(`/user/show/(\d+)(?:-([^"'/?#]+))?`)
+
+// searchPeopleAt scrapes the Goodreads people search and returns the first
+// match as a low-confidence ResolvedUser.
+func searchPeopleAt(base, q string) (*ResolvedUser, error) {
+	u := base + "/search?q=" + url.QueryEscape(q) + "&search_type=people"
+	resp, err := http.Get(u)
+	if err != nil {
+		return nil, fmt.Errorf("search people: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("people search returned %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read search body: %w", err)
+	}
+	m := searchUserRe.FindSubmatch(body)
+	if m == nil {
+		return nil, errors.New("no people search match")
+	}
+	id := string(m[1])
+	slug := ""
+	if len(m) > 2 {
+		slug = string(m[2])
+	}
+	return &ResolvedUser{
+		UserID:      id,
+		DisplayName: nameFromSlug(slug),
+		ProfileURL:  goodreadsBase + "/user/show/" + id,
+		Confidence:  0.5,
+	}, nil
 }
 
 // resolveUsernameAt is the inner helper exposed for tests.
