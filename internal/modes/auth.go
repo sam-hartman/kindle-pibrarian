@@ -10,14 +10,22 @@ import (
 // RequirePasscode is HTTP middleware that gates all non-public requests behind
 // a shared passcode supplied via the WEB_PASSCODE environment variable.
 //
+// Composition: this middleware is intended to be wrapped INSIDE WithCORS, i.e.
+// the call site uses WithCORS(RequirePasscode(mux)). CORS is the outer layer
+// so that CORS headers are set on every response (including 401s) and OPTIONS
+// preflights are short-circuited before reaching this handler. The OPTIONS
+// pass-through below is therefore defense-in-depth for the (unlikely) case
+// that this middleware is mounted without WithCORS in front of it.
+//
 // Behavior:
 //   - If WEB_PASSCODE is empty/unset, the middleware is a no-op (passes through).
 //   - GET /health and GET / are always allowed (used by health checks and discovery).
-//   - OPTIONS requests always pass through so the downstream CORS handler can
-//     respond to preflight.
+//   - OPTIONS requests always pass through (defense-in-depth; WithCORS normally
+//     short-circuits these before they reach here).
 //   - All other requests must include "Authorization: Bearer <passcode>".
-//     The comparison uses crypto/subtle.ConstantTimeCompare to avoid timing
-//     leaks. Mismatches receive 401 Unauthorized.
+//     The scheme check is case-insensitive per RFC 7235. The credential
+//     comparison uses crypto/subtle.ConstantTimeCompare to avoid timing leaks.
+//     Mismatches receive 401 Unauthorized.
 func RequirePasscode(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		passcode := os.Getenv("WEB_PASSCODE")
@@ -39,13 +47,13 @@ func RequirePasscode(next http.Handler) http.Handler {
 		}
 
 		const prefix = "Bearer "
-		header := r.Header.Get("Authorization")
-		if !strings.HasPrefix(header, prefix) {
+		auth := r.Header.Get("Authorization")
+		if len(auth) < len(prefix) || !strings.EqualFold(auth[:len(prefix)], prefix) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		supplied := header[len(prefix):]
-		if subtle.ConstantTimeCompare([]byte(supplied), []byte(passcode)) != 1 {
+		got := []byte(strings.TrimSpace(auth[len(prefix):]))
+		if subtle.ConstantTimeCompare(got, []byte(passcode)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
