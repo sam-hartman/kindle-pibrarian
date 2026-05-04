@@ -24,12 +24,13 @@ func TestResolveUserID_NumericInput(t *testing.T) {
 
 func TestResolveUserID_ProfileURL(t *testing.T) {
 	cases := []struct {
-		input string
-		want  string
+		input           string
+		want            string
+		wantDisplayName string
 	}{
-		{"https://www.goodreads.com/user/show/1234567-jane-doe", "1234567"},
-		{"https://goodreads.com/user/show/9876543", "9876543"},
-		{"http://www.goodreads.com/user/show/42-douglas", "42"},
+		{"https://www.goodreads.com/user/show/1234567-jane-doe", "1234567", "Jane Doe"},
+		{"https://goodreads.com/user/show/9876543", "9876543", ""},
+		{"http://www.goodreads.com/user/show/42-douglas", "42", "Douglas"},
 	}
 	for _, tc := range cases {
 		got, err := ResolveUserID(tc.input)
@@ -42,6 +43,9 @@ func TestResolveUserID_ProfileURL(t *testing.T) {
 		}
 		if got.Confidence != 1.0 {
 			t.Errorf("input=%q: Confidence = %v, want 1.0", tc.input, got.Confidence)
+		}
+		if got.DisplayName != tc.wantDisplayName {
+			t.Errorf("input=%q: DisplayName = %q, want %q", tc.input, got.DisplayName, tc.wantDisplayName)
 		}
 	}
 }
@@ -66,5 +70,8 @@ func TestResolveUserID_UsernameRedirect(t *testing.T) {
 	}
 	if got.Confidence != 1.0 {
 		t.Errorf("Confidence = %v, want 1.0", got.Confidence)
+	}
+	if got.DisplayName != "Jane Doe" {
+		t.Errorf("DisplayName = %q, want %q", got.DisplayName, "Jane Doe")
 	}
 }

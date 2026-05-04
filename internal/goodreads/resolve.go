@@ -6,13 +6,14 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 const goodreadsBase = "https://www.goodreads.com"
 
 var numericRe = regexp.MustCompile(`^\d+$`)
-var profileURLRe = regexp.MustCompile(`goodreads\.com/user/show/(\d+)`)
-var looseUserIDRe = regexp.MustCompile(`/user/show/(\d+)`)
+var profileURLRe = regexp.MustCompile(`goodreads\.com/user/show/(\d+)(?:-([^/?#]+))?`)
+var looseUserIDRe = regexp.MustCompile(`/user/show/(\d+)(?:-([^/?#]+))?`)
 
 // ResolveUserID accepts a numeric ID, a profile URL, or a username and returns
 // the canonical Goodreads user ID and display info.
@@ -32,10 +33,15 @@ func ResolveUserID(input string) (*ResolvedUser, error) {
 
 	if m := profileURLRe.FindStringSubmatch(input); m != nil {
 		id := m[1]
+		slug := ""
+		if len(m) > 2 {
+			slug = m[2]
+		}
 		return &ResolvedUser{
-			UserID:     id,
-			ProfileURL: goodreadsBase + "/user/show/" + id,
-			Confidence: 1.0,
+			UserID:      id,
+			DisplayName: nameFromSlug(slug),
+			ProfileURL:  goodreadsBase + "/user/show/" + id,
+			Confidence:  1.0,
 		}, nil
 	}
 
@@ -71,9 +77,36 @@ func resolveUsernameAt(base, username string) (*ResolvedUser, error) {
 	if m == nil {
 		return nil, fmt.Errorf("no user id in redirect %q", loc)
 	}
+	slug := ""
+	if len(m) > 2 {
+		slug = m[2]
+	}
 	return &ResolvedUser{
-		UserID:     m[1],
-		ProfileURL: goodreadsBase + "/user/show/" + m[1],
-		Confidence: 1.0,
+		UserID:      m[1],
+		DisplayName: nameFromSlug(slug),
+		ProfileURL:  goodreadsBase + "/user/show/" + m[1],
+		Confidence:  1.0,
 	}, nil
+}
+
+// nameFromSlug converts a Goodreads URL slug like "jane-doe" into a
+// display name like "Jane Doe". If the slug is empty, returns "".
+func nameFromSlug(slug string) string {
+	if slug == "" {
+		return ""
+	}
+	parts := strings.Split(slug, "-")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		runes := []rune(p)
+		runes[0] = unicode.ToUpper(runes[0])
+		for i := 1; i < len(runes); i++ {
+			runes[i] = unicode.ToLower(runes[i])
+		}
+		out = append(out, string(runes))
+	}
+	return strings.Join(out, " ")
 }
