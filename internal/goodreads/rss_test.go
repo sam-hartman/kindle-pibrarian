@@ -80,6 +80,16 @@ func TestFetchShelf_Caps100(t *testing.T) {
 	}
 }
 
+func TestFetchShelf_RejectsNonNumericUserID(t *testing.T) {
+	got, err := FetchShelf("not-a-number", "to-read")
+	if err == nil {
+		t.Fatalf("expected error for non-numeric user id, got nil")
+	}
+	if got != nil {
+		t.Errorf("expected nil books, got %+v", got)
+	}
+}
+
 func TestFetchShelf_CachesAcrossCalls(t *testing.T) {
 	shelfCacheMu.Lock()
 	shelfCache["99999:to-read"] = cacheEntry{

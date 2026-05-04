@@ -74,6 +74,9 @@ var (
 )
 
 func FetchShelf(userID, shelf string) ([]ShelfBook, error) {
+	if !numericRe.MatchString(userID) {
+		return nil, fmt.Errorf("invalid user id %q", userID)
+	}
 	if shelf == "" {
 		shelf = "to-read"
 	}
