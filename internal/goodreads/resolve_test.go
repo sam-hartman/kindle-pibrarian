@@ -17,3 +17,27 @@ func TestResolveUserID_NumericInput(t *testing.T) {
 		t.Errorf("ProfileURL = %q", got.ProfileURL)
 	}
 }
+
+func TestResolveUserID_ProfileURL(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"https://www.goodreads.com/user/show/1234567-jane-doe", "1234567"},
+		{"https://goodreads.com/user/show/9876543", "9876543"},
+		{"http://www.goodreads.com/user/show/42-douglas", "42"},
+	}
+	for _, tc := range cases {
+		got, err := ResolveUserID(tc.input)
+		if err != nil {
+			t.Errorf("input=%q: unexpected error: %v", tc.input, err)
+			continue
+		}
+		if got.UserID != tc.want {
+			t.Errorf("input=%q: UserID = %q, want %q", tc.input, got.UserID, tc.want)
+		}
+		if got.Confidence != 1.0 {
+			t.Errorf("input=%q: Confidence = %v, want 1.0", tc.input, got.Confidence)
+		}
+	}
+}
