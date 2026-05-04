@@ -14,7 +14,8 @@ import (
 // instead of using the constant.
 func fetchShelfAt(base, userID, shelf string) ([]ShelfBook, error) {
 	u := fmt.Sprintf("%s/review/list_rss/%s?shelf=%s", base, url.PathEscape(userID), url.QueryEscape(shelf))
-	resp, err := http.Get(u)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(u)
 	if err != nil {
 		return nil, fmt.Errorf("fetch shelf: %w", err)
 	}

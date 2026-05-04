@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -64,7 +65,8 @@ var searchUserRe = regexp.MustCompile(`/user/show/(\d+)(?:-([^"'/?#]+))?`)
 // match as a low-confidence ResolvedUser.
 func searchPeopleAt(base, q string) (*ResolvedUser, error) {
 	u := base + "/search?q=" + url.QueryEscape(q) + "&search_type=people"
-	resp, err := http.Get(u)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(u)
 	if err != nil {
 		return nil, fmt.Errorf("search people: %w", err)
 	}
@@ -96,6 +98,7 @@ func searchPeopleAt(base, q string) (*ResolvedUser, error) {
 // resolveUsernameAt is the inner helper exposed for tests.
 func resolveUsernameAt(base, username string) (*ResolvedUser, error) {
 	client := &http.Client{
+		Timeout: 10 * time.Second,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
