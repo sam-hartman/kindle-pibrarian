@@ -1,3 +1,6 @@
+// Package goodreads resolves Goodreads users by URL/username/ID and reads
+// public shelf RSS feeds. It exists because the public Goodreads API was
+// closed to new keys in December 2020.
 package goodreads
 
 // ShelfBook represents one entry from a Goodreads shelf RSS feed.

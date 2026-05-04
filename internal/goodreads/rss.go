@@ -55,13 +55,15 @@ func fetchShelfAt(base, userID, shelf string) ([]ShelfBook, error) {
 			PublishedYear: it.BookPublished,
 		})
 	}
-	if len(books) > 100 {
-		books = books[:100]
+	if len(books) > maxShelfItems {
+		books = books[:maxShelfItems]
 	}
 	return books, nil
 }
 
-// FetchShelf is the public entry point with a 10-minute in-process cache.
+const maxShelfItems = 100
+
+// cacheEntry holds a cached shelf result and its expiry time.
 type cacheEntry struct {
 	books   []ShelfBook
 	expires time.Time
@@ -73,6 +75,7 @@ var (
 	cacheTTL     = 10 * time.Minute
 )
 
+// FetchShelf is the public entry point with a 10-minute in-process cache.
 func FetchShelf(userID, shelf string) ([]ShelfBook, error) {
 	if !numericRe.MatchString(userID) {
 		return nil, fmt.Errorf("invalid user id %q", userID)
