@@ -64,3 +64,44 @@ func TestRequirePasscode_NoOpWhenEnvUnset(t *testing.T) {
 		t.Errorf("expected 200 (no-op), got %d", rec.Code)
 	}
 }
+
+func TestWithCORS_PreflightShortCircuits(t *testing.T) {
+	// Downstream handler should NOT be invoked for OPTIONS preflight.
+	called := false
+	downstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+	h := WithCORS(downstream)
+
+	req := httptest.NewRequest(http.MethodOptions, "/goodreads/resolve", nil)
+	req.Header.Set("Origin", "https://example.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("expected 204, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("expected ACAO=*, got %q", got)
+	}
+	if called {
+		t.Errorf("downstream handler should not be called for OPTIONS preflight")
+	}
+}
+
+func TestWithCORS_PassThroughSetsHeaders(t *testing.T) {
+	h := WithCORS(okHandler())
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("expected ACAO=*, got %q", got)
+	}
+}

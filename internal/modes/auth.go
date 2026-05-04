@@ -52,3 +52,28 @@ func RequirePasscode(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// WithCORS is HTTP middleware that applies a permissive CORS policy suitable
+// for a personal web app talking to this backend from any origin (the passcode
+// is the actual access control).
+//
+// Behavior:
+//   - Sets Access-Control-Allow-Origin: *
+//   - Sets Access-Control-Allow-Methods: GET, POST, OPTIONS
+//   - Sets Access-Control-Allow-Headers: Authorization, Content-Type
+//   - Sets Access-Control-Max-Age: 86400
+//   - For OPTIONS preflight, short-circuits with 204 No Content.
+func WithCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
