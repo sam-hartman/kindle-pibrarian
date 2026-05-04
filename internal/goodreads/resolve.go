@@ -113,6 +113,18 @@ func resolveUsernameAt(base, username string) (*ResolvedUser, error) {
 	if loc == "" {
 		return nil, fmt.Errorf("no redirect for username %q", username)
 	}
+	if strings.HasPrefix(loc, "http://") || strings.HasPrefix(loc, "https://") {
+		u, err := url.Parse(loc)
+		if err != nil {
+			return nil, fmt.Errorf("parse redirect %q: %w", loc, err)
+		}
+		host := strings.ToLower(u.Host)
+		if host != "goodreads.com" && !strings.HasSuffix(host, ".goodreads.com") {
+			return nil, fmt.Errorf("redirect to foreign host %q", u.Host)
+		}
+	} else if !strings.HasPrefix(loc, "/") {
+		return nil, fmt.Errorf("unexpected redirect target %q", loc)
+	}
 	m := profileURLRe.FindStringSubmatch(loc)
 	if m == nil {
 		// Try a leading-slash variant: "/user/show/123"

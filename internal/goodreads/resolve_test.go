@@ -76,6 +76,22 @@ func TestResolveUserID_UsernameRedirect(t *testing.T) {
 	}
 }
 
+func TestResolveUserID_RejectsForeignRedirect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://evil.example.com/user/show/1234567-jane-doe")
+		w.WriteHeader(http.StatusMovedPermanently)
+	}))
+	defer srv.Close()
+
+	got, err := resolveUsernameAt(srv.URL, "janedoe")
+	if err == nil {
+		t.Fatalf("expected error for foreign redirect, got nil")
+	}
+	if got != nil {
+		t.Errorf("expected nil ResolvedUser, got %+v", got)
+	}
+}
+
 func TestResolveUserID_SearchFallback(t *testing.T) {
 	html := `<html><body>
 		<div class="result"><a class="userReview" href="/user/show/9876-found-person">Found Person</a></div>
