@@ -99,7 +99,7 @@ func TestResolveUserID_SearchFallback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/search" {
 			w.Header().Set("Content-Type", "text/html")
-			w.Write([]byte(html))
+			_, _ = w.Write([]byte(html))
 			return
 		}
 		http.NotFound(w, r)

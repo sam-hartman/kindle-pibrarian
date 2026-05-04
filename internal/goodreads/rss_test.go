@@ -35,7 +35,7 @@ const sampleRSS = `<?xml version="1.0" encoding="UTF-8"?>
 func TestFetchShelf_ParsesRSS(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
-		w.Write([]byte(sampleRSS))
+		_, _ = w.Write([]byte(sampleRSS))
 	}))
 	defer srv.Close()
 
@@ -68,7 +68,7 @@ func TestFetchShelf_Caps100(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")
-		w.Write([]byte(feed))
+		_, _ = w.Write([]byte(feed))
 	}))
 	defer srv.Close()
 
