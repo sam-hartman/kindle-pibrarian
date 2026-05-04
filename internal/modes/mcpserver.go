@@ -661,15 +661,28 @@ func StartMCPHTTPServer(port string) {
 		var body struct {
 			Input string `json:"input"`
 		}
+		// Bound the request body to 64 KiB; nothing legitimate is bigger here.
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
+		body.Input = strings.TrimSpace(body.Input)
+		if body.Input == "" || len(body.Input) > 2048 {
+			http.Error(w, "input must be a non-empty string up to 2048 characters", http.StatusBadRequest)
+			return
+		}
 		got, err := goodreads.ResolveUserID(body.Input)
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			l.Warn("goodreads resolve failed",
+				zap.String("input_truncated", truncate(body.Input, 100)),
+				zap.Error(err),
+			)
+			status := http.StatusBadGateway
+			if strings.Contains(err.Error(), "could not resolve") {
+				status = http.StatusNotFound
+			}
+			writeJSONError(w, status, "could not resolve goodreads user")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -691,11 +704,21 @@ func StartMCPHTTPServer(port string) {
 		if shelf == "" {
 			shelf = "to-read"
 		}
+		switch shelf {
+		case "to-read", "currently-reading", "read":
+			// ok
+		default:
+			http.Error(w, "shelf must be one of: to-read, currently-reading, read", http.StatusBadRequest)
+			return
+		}
 		books, err := goodreads.FetchShelf(userID, shelf)
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadGateway)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			l.Warn("goodreads fetch shelf failed",
+				zap.String("user_id", userID),
+				zap.String("shelf", shelf),
+				zap.Error(err),
+			)
+			writeJSONError(w, http.StatusBadGateway, "could not fetch goodreads shelf")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
