@@ -1,8 +1,10 @@
 package goodreads
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -50,5 +52,29 @@ func TestFetchShelf_ParsesRSS(t *testing.T) {
 	}
 	if got[0].CoverURL != "https://images.example/cover.jpg" {
 		t.Errorf("first item cover: %q", got[0].CoverURL)
+	}
+}
+
+func TestFetchShelf_Caps100(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n<rss version=\"2.0\"><channel>")
+	for i := 0; i < 105; i++ {
+		fmt.Fprintf(&b, `<item><title>Book %d</title><link>https://x/%d</link><author_name>A</author_name></item>`, i, i)
+	}
+	b.WriteString("</channel></rss>")
+	feed := b.String()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		w.Write([]byte(feed))
+	}))
+	defer srv.Close()
+
+	got, err := fetchShelfAt(srv.URL, "1234567", "to-read")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 100 {
+		t.Errorf("len(got) = %d, want 100", len(got))
 	}
 }

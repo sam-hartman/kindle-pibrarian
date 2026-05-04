@@ -54,6 +54,9 @@ func fetchShelfAt(base, userID, shelf string) ([]ShelfBook, error) {
 			PublishedYear: it.BookPublished,
 		})
 	}
+	if len(books) > 100 {
+		books = books[:100]
+	}
 	return books, nil
 }
 
