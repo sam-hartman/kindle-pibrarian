@@ -12,11 +12,15 @@ import (
 	"unicode"
 )
 
-const goodreadsBase = "https://www.goodreads.com"
+var (
+	// goodreadsBase is the production base URL. It's a var (not const) so
+	// tests can override it to point at a local httptest server.
+	goodreadsBase = "https://www.goodreads.com"
 
-var numericRe = regexp.MustCompile(`^\d+$`)
-var profileURLRe = regexp.MustCompile(`goodreads\.com/user/show/(\d+)(?:-([^/?#]+))?`)
-var looseUserIDRe = regexp.MustCompile(`/user/show/(\d+)(?:-([^/?#]+))?`)
+	numericRe     = regexp.MustCompile(`^\d+$`)
+	profileURLRe  = regexp.MustCompile(`goodreads\.com/user/show/(\d+)(?:-([^/?#]+))?`)
+	looseUserIDRe = regexp.MustCompile(`/user/show/(\d+)(?:-([^/?#]+))?`)
+)
 
 // ResolveUserID accepts a numeric ID, a profile URL, or a username and returns
 // the canonical Goodreads user ID and display info.

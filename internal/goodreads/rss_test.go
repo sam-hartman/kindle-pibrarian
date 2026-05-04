@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -77,6 +78,39 @@ func TestFetchShelf_Caps100(t *testing.T) {
 	}
 	if len(got) != 100 {
 		t.Errorf("len(got) = %d, want 100", len(got))
+	}
+}
+
+func TestFetchShelf_WritesCacheOnFirstFetch(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(sampleRSS))
+	}))
+	defer srv.Close()
+
+	origBase := goodreadsBase
+	goodreadsBase = srv.URL
+	t.Cleanup(func() {
+		goodreadsBase = origBase
+		shelfCacheMu.Lock()
+		delete(shelfCache, "11111:to-read")
+		shelfCacheMu.Unlock()
+	})
+
+	shelfCacheMu.Lock()
+	delete(shelfCache, "11111:to-read")
+	shelfCacheMu.Unlock()
+
+	if _, err := FetchShelf("11111", "to-read"); err != nil {
+		t.Fatalf("first FetchShelf error: %v", err)
+	}
+	if _, err := FetchShelf("11111", "to-read"); err != nil {
+		t.Fatalf("second FetchShelf error: %v", err)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("upstream request count = %d, want 1 (second call should hit cache)", got)
 	}
 }
 
