@@ -1,6 +1,10 @@
 package goodreads
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
 
 func TestResolveUserID_NumericInput(t *testing.T) {
 	got, err := ResolveUserID("1234567")
@@ -39,5 +43,28 @@ func TestResolveUserID_ProfileURL(t *testing.T) {
 		if got.Confidence != 1.0 {
 			t.Errorf("input=%q: Confidence = %v, want 1.0", tc.input, got.Confidence)
 		}
+	}
+}
+
+func TestResolveUserID_UsernameRedirect(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/janedoe" {
+			w.Header().Set("Location", "/user/show/1234567-jane-doe")
+			w.WriteHeader(http.StatusMovedPermanently)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	got, err := resolveUsernameAt(srv.URL, "janedoe")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.UserID != "1234567" {
+		t.Errorf("UserID = %q, want 1234567", got.UserID)
+	}
+	if got.Confidence != 1.0 {
+		t.Errorf("Confidence = %v, want 1.0", got.Confidence)
 	}
 }
