@@ -7,8 +7,9 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/annas-mcp ./cmd/annas-mcp
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates iptables ip6tables curl \
- && curl -fsSL https://tailscale.com/install.sh | sh
+# Install tailscale via apk directly (the install.sh script runs `rc-update`
+# which requires OpenRC; we don't have/need it in this image).
+RUN apk add --no-cache ca-certificates iptables ip6tables tailscale
 COPY --from=build /out/annas-mcp /usr/local/bin/annas-mcp
 COPY <<'EOF' /usr/local/bin/start.sh
 #!/bin/sh
