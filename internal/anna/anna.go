@@ -20,6 +20,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	colly "github.com/gocolly/colly/v2"
 	"github.com/sam-hartman/kindle-pibrarian/internal/logger"
+	"github.com/sam-hartman/kindle-pibrarian/internal/relay"
 	"go.uber.org/zap"
 )
 
@@ -430,6 +431,13 @@ func FindBook(query string) ([]*Book, error) {
 func FindBookWithFormat(query, preferredFormat string) ([]*Book, error) {
 	l := logger.GetLogger()
 
+	// When the relay is configured (Fly deployment), forward the
+	// search to the Pi's annas-mcp via the relay. The Pi already
+	// scrapes annas-archive successfully from a residential IP.
+	if _, _, ok := relay.Config(); ok {
+		return findBookViaRelay(query, preferredFormat)
+	}
+
 	c := colly.NewCollector(
 		colly.Async(true),
 	)
@@ -709,6 +717,12 @@ func (b *Book) Download(secretKey, folderPath string) error {
 		zap.String("folderPath", folderPath),
 	)
 
+	// Relay path: Pi performs the download itself. We don't get the
+	// file bytes back (Fly has no persistent storage for them anyway).
+	if _, _, ok := relay.Config(); ok {
+		return downloadViaRelay(b.Hash, b.Title, b.Format, "")
+	}
+
 	// Download file using shared helper
 	fileData, err := downloadFileData(b.Hash, secretKey)
 	if err != nil {
@@ -751,6 +765,15 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 		zap.String("title", b.Title),
 		zap.String("format", b.Format),
 	)
+
+	// Relay path: the Pi-side annas-mcp handles SMTP itself when
+	// kindle_email is provided, so we just forward the request.
+	if _, _, ok := relay.Config(); ok {
+		if kindleEmail == "" {
+			return errors.New("kindle_email required for EmailToKindle via relay")
+		}
+		return downloadViaRelay(b.Hash, b.Title, b.Format, kindleEmail)
+	}
 
 	// Check if email is configured
 	if smtpHost == "" || smtpUser == "" || smtpPassword == "" || fromEmail == "" {
