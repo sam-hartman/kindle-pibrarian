@@ -3,7 +3,6 @@ package goodreads
 import (
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -58,7 +57,8 @@ func ResolveUserID(input string) (*ResolvedUser, error) {
 	}
 
 	// Treat as username. When the relay is configured, prefer routing
-	// through it (Goodreads blocks Fly egress IPs).
+	// through it (Goodreads blocks Fly egress IPs). Username → 301 → exact
+	// canonical user is deterministic too.
 	if _, _, ok := relay.Config(); ok {
 		if u, err := resolveUsernameViaRelay(input); err == nil {
 			return u, nil
@@ -68,18 +68,7 @@ func ResolveUserID(input string) (*ResolvedUser, error) {
 			return u, nil
 		}
 	}
-	// Fallback: low-confidence people search. The /search endpoint
-	// returns a normal HTML page so it works through the relay too.
-	if _, _, ok := relay.Config(); ok {
-		if u, err := searchPeopleViaRelay(input); err == nil {
-			return u, nil
-		}
-	} else {
-		if u, err := searchPeopleAt(goodreadsBase, input); err == nil {
-			return u, nil
-		}
-	}
-	return nil, errors.New("could not resolve to a Goodreads user")
+	return nil, errors.New("could not resolve goodreads user — paste your profile URL or numeric ID from goodreads.com/user/show/...")
 }
 
 // resolveUsernameViaRelay does what resolveUsernameAt does, but routes
@@ -128,78 +117,6 @@ func resolveUsernameViaRelay(username string) (*ResolvedUser, error) {
 		DisplayName: nameFromSlug(slug),
 		ProfileURL:  goodreadsBase + "/user/show/" + m[1],
 		Confidence:  1.0,
-	}, nil
-}
-
-// searchPeopleViaRelay scrapes the people-search HTML through the relay.
-func searchPeopleViaRelay(q string) (*ResolvedUser, error) {
-	path := "/search?q=" + url.QueryEscape(q) + "&search_type=people"
-	req, err := relay.NewRequest("GET", relay.TargetGoodreads, path, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := relay.Client().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("search people via relay: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("people search via relay returned %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read search body: %w", err)
-	}
-	m := searchUserRe.FindSubmatch(body)
-	if m == nil {
-		return nil, errors.New("no people search match")
-	}
-	id := string(m[1])
-	slug := ""
-	if len(m) > 2 {
-		slug = string(m[2])
-	}
-	return &ResolvedUser{
-		UserID:      id,
-		DisplayName: nameFromSlug(slug),
-		ProfileURL:  goodreadsBase + "/user/show/" + id,
-		Confidence:  0.5,
-	}, nil
-}
-
-var searchUserRe = regexp.MustCompile(`/user/show/(\d+)(?:-([^"'/?#]+))?`)
-
-// searchPeopleAt scrapes the Goodreads people search and returns the first
-// match as a low-confidence ResolvedUser.
-func searchPeopleAt(base, q string) (*ResolvedUser, error) {
-	u := base + "/search?q=" + url.QueryEscape(q) + "&search_type=people"
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(u)
-	if err != nil {
-		return nil, fmt.Errorf("search people: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("people search returned %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read search body: %w", err)
-	}
-	m := searchUserRe.FindSubmatch(body)
-	if m == nil {
-		return nil, errors.New("no people search match")
-	}
-	id := string(m[1])
-	slug := ""
-	if len(m) > 2 {
-		slug = string(m[2])
-	}
-	return &ResolvedUser{
-		UserID:      id,
-		DisplayName: nameFromSlug(slug),
-		ProfileURL:  goodreadsBase + "/user/show/" + id,
-		Confidence:  0.5,
 	}, nil
 }
 

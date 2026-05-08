@@ -3,7 +3,6 @@ package goodreads
 import (
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -61,37 +60,6 @@ func TestResolveUsernameViaRelay_RejectsForeignRedirect(t *testing.T) {
 
 	if _, err := resolveUsernameViaRelay("janedoe"); err == nil {
 		t.Fatal("expected foreign-host rejection")
-	}
-}
-
-func TestSearchPeopleViaRelay_HitsSearchEndpoint(t *testing.T) {
-	html := `<a href="/user/show/9876-found-person">Found</a>`
-	var gotQuery atomic.Value
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotQuery.Store(r.URL.RawQuery)
-		_, _ = w.Write([]byte(html))
-	}))
-	defer srv.Close()
-	t.Setenv(relay.EnvBaseURL, srv.URL)
-	t.Setenv(relay.EnvSecret, "x")
-
-	got, err := searchPeopleViaRelay("found person")
-	if err != nil {
-		t.Fatalf("searchPeopleViaRelay: %v", err)
-	}
-	if got.UserID != "9876" {
-		t.Errorf("UserID = %q", got.UserID)
-	}
-	if got.Confidence != 0.5 {
-		t.Errorf("Confidence = %v", got.Confidence)
-	}
-	q, _ := gotQuery.Load().(string)
-	parsed, _ := url.ParseQuery(q)
-	if parsed.Get("search_type") != "people" {
-		t.Errorf("search_type = %q", parsed.Get("search_type"))
-	}
-	if parsed.Get("q") != "found person" {
-		t.Errorf("q = %q", parsed.Get("q"))
 	}
 }
 
