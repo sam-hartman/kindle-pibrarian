@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/sam-hartman/kindle-pibrarian/internal/relay"
 )
 
 var (
@@ -52,15 +54,114 @@ func ResolveUserID(input string) (*ResolvedUser, error) {
 		}, nil
 	}
 
-	// Treat as username
-	if u, err := resolveUsernameAt(goodreadsBase, input); err == nil {
-		return u, nil
+	// Treat as username. When the relay is configured, prefer routing
+	// through it (Goodreads blocks Fly egress IPs).
+	if _, _, ok := relay.Config(); ok {
+		if u, err := resolveUsernameViaRelay(input); err == nil {
+			return u, nil
+		}
+	} else {
+		if u, err := resolveUsernameAt(goodreadsBase, input); err == nil {
+			return u, nil
+		}
 	}
-	// Fallback: low-confidence people search.
-	if u, err := searchPeopleAt(goodreadsBase, input); err == nil {
-		return u, nil
+	// Fallback: low-confidence people search. The /search endpoint
+	// returns a normal HTML page so it works through the relay too.
+	if _, _, ok := relay.Config(); ok {
+		if u, err := searchPeopleViaRelay(input); err == nil {
+			return u, nil
+		}
+	} else {
+		if u, err := searchPeopleAt(goodreadsBase, input); err == nil {
+			return u, nil
+		}
 	}
 	return nil, errors.New("could not resolve to a Goodreads user")
+}
+
+// resolveUsernameViaRelay does what resolveUsernameAt does, but routes
+// the request through the Pi relay (X-Relay-Target: goodreads). The
+// relay sets allow_redirects=False so the 301 with Location reaches us.
+func resolveUsernameViaRelay(username string) (*ResolvedUser, error) {
+	req, err := relay.NewRequest("GET", relay.TargetGoodreads, "/"+username, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := relay.Client().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch %s via relay: %w", username, err)
+	}
+	defer resp.Body.Close()
+
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		return nil, fmt.Errorf("no redirect for username %q (status %d)", username, resp.StatusCode)
+	}
+	if strings.HasPrefix(loc, "http://") || strings.HasPrefix(loc, "https://") {
+		u, err := url.Parse(loc)
+		if err != nil {
+			return nil, fmt.Errorf("parse redirect %q: %w", loc, err)
+		}
+		host := strings.ToLower(u.Host)
+		if host != "goodreads.com" && !strings.HasSuffix(host, ".goodreads.com") {
+			return nil, fmt.Errorf("redirect to foreign host %q", u.Host)
+		}
+	} else if !strings.HasPrefix(loc, "/") {
+		return nil, fmt.Errorf("unexpected redirect target %q", loc)
+	}
+	m := profileURLRe.FindStringSubmatch(loc)
+	if m == nil {
+		m = looseUserIDRe.FindStringSubmatch(loc)
+	}
+	if m == nil {
+		return nil, fmt.Errorf("no user id in redirect %q", loc)
+	}
+	slug := ""
+	if len(m) > 2 {
+		slug = m[2]
+	}
+	return &ResolvedUser{
+		UserID:      m[1],
+		DisplayName: nameFromSlug(slug),
+		ProfileURL:  goodreadsBase + "/user/show/" + m[1],
+		Confidence:  1.0,
+	}, nil
+}
+
+// searchPeopleViaRelay scrapes the people-search HTML through the relay.
+func searchPeopleViaRelay(q string) (*ResolvedUser, error) {
+	path := "/search?q=" + url.QueryEscape(q) + "&search_type=people"
+	req, err := relay.NewRequest("GET", relay.TargetGoodreads, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := relay.Client().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("search people via relay: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("people search via relay returned %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read search body: %w", err)
+	}
+	m := searchUserRe.FindSubmatch(body)
+	if m == nil {
+		return nil, errors.New("no people search match")
+	}
+	id := string(m[1])
+	slug := ""
+	if len(m) > 2 {
+		slug = string(m[2])
+	}
+	return &ResolvedUser{
+		UserID:      id,
+		DisplayName: nameFromSlug(slug),
+		ProfileURL:  goodreadsBase + "/user/show/" + id,
+		Confidence:  0.5,
+	}, nil
 }
 
 var searchUserRe = regexp.MustCompile(`/user/show/(\d+)(?:-([^"'/?#]+))?`)
