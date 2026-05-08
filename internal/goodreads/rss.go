@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/sam-hartman/kindle-pibrarian/internal/relay"
 )
 
 // fetchShelfAt is the inner helper exposed for tests; it takes a base URL
@@ -27,7 +29,34 @@ func fetchShelfAt(base, userID, shelf string) ([]ShelfBook, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read shelf body: %w", err)
 	}
+	return parseShelfRSS(body)
+}
 
+// fetchShelfViaRelay fetches the shelf RSS through the Pi relay.
+func fetchShelfViaRelay(userID, shelf string) ([]ShelfBook, error) {
+	path := fmt.Sprintf("/review/list_rss/%s?shelf=%s", url.PathEscape(userID), url.QueryEscape(shelf))
+	req, err := relay.NewRequest("GET", relay.TargetGoodreads, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := relay.Client().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch shelf via relay: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("shelf fetch via relay returned %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read shelf body: %w", err)
+	}
+	return parseShelfRSS(body)
+}
+
+// parseShelfRSS parses the Goodreads shelf RSS XML payload, capping at
+// maxShelfItems.
+func parseShelfRSS(body []byte) ([]ShelfBook, error) {
 	var feed struct {
 		Channel struct {
 			Items []struct {
@@ -91,7 +120,13 @@ func FetchShelf(userID, shelf string) ([]ShelfBook, error) {
 	}
 	shelfCacheMu.RUnlock()
 
-	books, err := fetchShelfAt(goodreadsBase, userID, shelf)
+	var books []ShelfBook
+	var err error
+	if _, _, ok := relay.Config(); ok {
+		books, err = fetchShelfViaRelay(userID, shelf)
+	} else {
+		books, err = fetchShelfAt(goodreadsBase, userID, shelf)
+	}
 	if err != nil {
 		return nil, err
 	}
