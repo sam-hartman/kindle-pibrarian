@@ -50,6 +50,37 @@ func TestResolveUserID_ProfileURL(t *testing.T) {
 	}
 }
 
+func TestResolveUserID_ReviewListURL(t *testing.T) {
+	cases := []struct {
+		input           string
+		want            string
+		wantDisplayName string
+	}{
+		{"https://www.goodreads.com/review/list/170950204?shelf=to-read", "170950204", ""},
+		{"https://www.goodreads.com/review/list/170950204-sam-hartman", "170950204", "Sam Hartman"},
+		{"https://www.goodreads.com/review/list/170950204-sam-hartman?shelf=to-read", "170950204", "Sam Hartman"},
+	}
+	for _, tc := range cases {
+		got, err := ResolveUserID(tc.input)
+		if err != nil {
+			t.Errorf("input=%q: unexpected error: %v", tc.input, err)
+			continue
+		}
+		if got.UserID != tc.want {
+			t.Errorf("input=%q: UserID = %q, want %q", tc.input, got.UserID, tc.want)
+		}
+		if got.Confidence != 1.0 {
+			t.Errorf("input=%q: Confidence = %v, want 1.0", tc.input, got.Confidence)
+		}
+		if got.DisplayName != tc.wantDisplayName {
+			t.Errorf("input=%q: DisplayName = %q, want %q", tc.input, got.DisplayName, tc.wantDisplayName)
+		}
+		if got.ProfileURL != "https://www.goodreads.com/user/show/"+tc.want {
+			t.Errorf("input=%q: ProfileURL = %q", tc.input, got.ProfileURL)
+		}
+	}
+}
+
 func TestResolveUserID_UsernameRedirect(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/janedoe" {

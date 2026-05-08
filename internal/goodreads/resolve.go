@@ -19,9 +19,10 @@ var (
 	// tests can override it to point at a local httptest server.
 	goodreadsBase = "https://www.goodreads.com"
 
-	numericRe     = regexp.MustCompile(`^\d+$`)
-	profileURLRe  = regexp.MustCompile(`goodreads\.com/user/show/(\d+)(?:-([^/?#]+))?`)
-	looseUserIDRe = regexp.MustCompile(`/user/show/(\d+)(?:-([^/?#]+))?`)
+	numericRe       = regexp.MustCompile(`^\d+$`)
+	profileURLRe    = regexp.MustCompile(`goodreads\.com/user/show/(\d+)(?:-([^/?#]+))?`)
+	reviewListURLRe = regexp.MustCompile(`goodreads\.com/review/list/(\d+)(?:-([^/?#]+))?`)
+	looseUserIDRe   = regexp.MustCompile(`/user/show/(\d+)(?:-([^/?#]+))?`)
 )
 
 // ResolveUserID accepts a numeric ID, a profile URL, or a username and returns
@@ -40,18 +41,20 @@ func ResolveUserID(input string) (*ResolvedUser, error) {
 		}, nil
 	}
 
-	if m := profileURLRe.FindStringSubmatch(input); m != nil {
-		id := m[1]
-		slug := ""
-		if len(m) > 2 {
-			slug = m[2]
+	for _, re := range []*regexp.Regexp{profileURLRe, reviewListURLRe} {
+		if m := re.FindStringSubmatch(input); m != nil {
+			id := m[1]
+			slug := ""
+			if len(m) > 2 {
+				slug = m[2]
+			}
+			return &ResolvedUser{
+				UserID:      id,
+				DisplayName: nameFromSlug(slug),
+				ProfileURL:  goodreadsBase + "/user/show/" + id,
+				Confidence:  1.0,
+			}, nil
 		}
-		return &ResolvedUser{
-			UserID:      id,
-			DisplayName: nameFromSlug(slug),
-			ProfileURL:  goodreadsBase + "/user/show/" + id,
-			Confidence:  1.0,
-		}, nil
 	}
 
 	// Treat as username. When the relay is configured, prefer routing
