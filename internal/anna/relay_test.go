@@ -104,7 +104,7 @@ func TestDownloadViaRelay_KindleEmailIncluded(t *testing.T) {
 	srv, cap := mockRelay(t, resp)
 	defer srv.Close()
 
-	if err := downloadViaRelay("abc", "Title", "epub", "user@kindle.com"); err != nil {
+	if err := downloadViaRelay("abc", "Title", "epub", "Jane Doe", "user@kindle.com"); err != nil {
 		t.Fatalf("downloadViaRelay: %v", err)
 	}
 	if cap.body.Params.Name != "download" {
@@ -112,6 +112,9 @@ func TestDownloadViaRelay_KindleEmailIncluded(t *testing.T) {
 	}
 	if cap.body.Params.Arguments["hash"] != "abc" {
 		t.Errorf("hash arg = %v", cap.body.Params.Arguments["hash"])
+	}
+	if cap.body.Params.Arguments["author"] != "Jane Doe" {
+		t.Errorf("author arg = %v", cap.body.Params.Arguments["author"])
 	}
 	if cap.body.Params.Arguments["kindle_email"] != "user@kindle.com" {
 		t.Errorf("kindle_email arg = %v", cap.body.Params.Arguments["kindle_email"])
@@ -129,11 +132,14 @@ func TestDownloadViaRelay_NoKindleEmailOmitsField(t *testing.T) {
 	srv, cap := mockRelay(t, resp)
 	defer srv.Close()
 
-	if err := downloadViaRelay("abc", "Title", "epub", ""); err != nil {
+	if err := downloadViaRelay("abc", "Title", "epub", "", ""); err != nil {
 		t.Fatalf("downloadViaRelay: %v", err)
 	}
 	if _, ok := cap.body.Params.Arguments["kindle_email"]; ok {
 		t.Errorf("kindle_email should be omitted when empty, got %v", cap.body.Params.Arguments["kindle_email"])
+	}
+	if _, ok := cap.body.Params.Arguments["author"]; ok {
+		t.Errorf("author should be omitted when empty, got %v", cap.body.Params.Arguments["author"])
 	}
 }
 

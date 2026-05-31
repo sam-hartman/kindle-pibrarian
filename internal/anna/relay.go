@@ -157,12 +157,15 @@ func findBookViaRelay(query, preferredFormat string) ([]*Book, error) {
 // relay. When kindleEmail is non-empty the Pi-side server handles SMTP
 // directly; otherwise it just downloads the file on the Pi (we discard
 // the file on this side, since the Fly app has no local storage).
-func downloadViaRelay(hash, title, format, kindleEmail string) error {
+func downloadViaRelay(hash, title, format, author, kindleEmail string) error {
 	l := logger.GetLogger()
 	args := map[string]interface{}{
 		"hash":   hash,
 		"title":  title,
 		"format": format,
+	}
+	if author != "" {
+		args["author"] = author
 	}
 	if kindleEmail != "" {
 		args["kindle_email"] = kindleEmail

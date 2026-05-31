@@ -700,7 +700,7 @@ func (b *Book) Download(secretKey, folderPath string) error {
 	// Relay path: Pi performs the download itself. We don't get the
 	// file bytes back (Fly has no persistent storage for them anyway).
 	if _, _, ok := relay.Config(); ok {
-		return downloadViaRelay(b.Hash, b.Title, b.Format, "")
+		return downloadViaRelay(b.Hash, b.Title, b.Format, b.Authors, "")
 	}
 
 	// Download file using shared helper
@@ -746,13 +746,14 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 		zap.String("format", b.Format),
 	)
 
-	// Relay path: the Pi-side annas-mcp handles SMTP itself when
-	// kindle_email is provided, so we just forward the request.
+	// Relay path: the Pi-side annas-mcp handles the download + SMTP (and the
+	// auto-fallback below) itself, so we just forward the request (incl. author
+	// so the Pi can safely match alternate editions).
 	if _, _, ok := relay.Config(); ok {
 		if kindleEmail == "" {
 			return errors.New("kindle_email required for EmailToKindle via relay")
 		}
-		return downloadViaRelay(b.Hash, b.Title, b.Format, kindleEmail)
+		return downloadViaRelay(b.Hash, b.Title, b.Format, b.Authors, kindleEmail)
 	}
 
 	// Check if email is configured
@@ -760,95 +761,40 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 		return errors.New("email configuration incomplete: SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and FROM_EMAIL must be set")
 	}
 
-	// Download file using shared helper
-	fileData, err := downloadFileData(b.Hash, secretKey)
-	if err != nil {
-		return err
-	}
-
-	// Detect actual file format from file content (Content-Type may not be reliable)
-	actualFormat, _ := detectFileFormat("", fileData)
-
-	// Save to disk as backup (optional, uses ANNAS_DOWNLOAD_PATH if set)
-	// This allows you to have a local copy even when emailing
-	if downloadPath := os.Getenv("ANNAS_DOWNLOAD_PATH"); downloadPath != "" {
-		format := actualFormat
-		if format == "unknown" {
-			format = b.Format
-		}
-		filename := sanitizeFilename(b.Title) + "." + format
-		filePath := filepath.Join(downloadPath, filename)
-
-		l.Info("Checking if file already exists before saving",
-			zap.String("path", filePath),
-			zap.String("hash", b.Hash),
+	// Try the requested edition first.
+	firstErr := sendOneEdition(b, secretKey, smtpHost, smtpPort, smtpUser, smtpPassword, fromEmail, kindleEmail)
+	if firstErr == nil {
+		l.Info("Book sent to Kindle successfully",
+			zap.String("title", b.Title),
+			zap.String("kindle_email", kindleEmail),
 		)
+		return nil
+	}
+	l.Warn("Requested edition could not be sent; trying alternate editions",
+		zap.String("title", b.Title), zap.Error(firstErr))
 
-		// Check if file already exists to avoid duplicates
-		if _, err := os.Stat(filePath); err == nil {
-			l.Info("File already exists, skipping save to prevent duplicate",
-				zap.String("path", filePath),
-				zap.String("hash", b.Hash),
-			)
-		} else {
-			l.Info("File does not exist, saving to disk",
-				zap.String("path", filePath),
-				zap.String("hash", b.Hash),
-				zap.Int64("size_bytes", int64(len(fileData))),
-			)
-			if err := os.WriteFile(filePath, fileData, 0644); err != nil {
-				// Log but don't fail if we can't save to disk
-				l.Warn("Failed to save file to disk as backup",
-					zap.String("path", filePath),
-					zap.Error(err),
-				)
+	// Auto-fallback: try other EPUB editions of the SAME book so one bad file
+	// (corrupt, DRM, etc.) doesn't fail the reader — "it should just work". We
+	// only do this when the author is known, to be certain we never deliver a
+	// different book that merely shares the title.
+	if strings.TrimSpace(b.Authors) != "" {
+		for _, alt := range findAlternateEditions(b.Title, b.Authors, b.Hash) {
+			if err := sendOneEdition(alt, secretKey, smtpHost, smtpPort, smtpUser, smtpPassword, fromEmail, kindleEmail); err == nil {
+				l.Info("Delivered an alternate edition after the requested one failed",
+					zap.String("title", b.Title), zap.String("alt_hash", alt.Hash))
+				return nil
 			} else {
-				l.Info("File saved to disk as backup successfully",
-					zap.String("path", filePath),
-					zap.String("hash", b.Hash),
-				)
+				l.Warn("Alternate edition also failed",
+					zap.String("alt_hash", alt.Hash), zap.Error(err))
 			}
 		}
-	} else {
-		l.Info("ANNAS_DOWNLOAD_PATH not set, skipping local save",
-			zap.String("hash", b.Hash),
-		)
 	}
 
-	// Trust content detection, not the agent-supplied format. detectFileFormat
-	// validates EPUB structure, so "unknown" here means the download was corrupt
-	// or an error page rather than a real ebook.
-	format := actualFormat
-	if format == "unknown" {
-		return fmt.Errorf("the downloaded file for %q is not a recognized ebook (likely a corrupt download or an error page) — try another edition", b.Title)
+	altNote := ""
+	if strings.TrimSpace(b.Authors) != "" {
+		altNote = " (no working alternate edition was found either)"
 	}
-
-	// Amazon's email Send-to-Kindle no longer accepts MOBI/AZW. Fail fast with an
-	// actionable message instead of emailing a file Amazon will silently reject.
-	if format == "mobi" || format == "azw" || format == "azw3" {
-		return fmt.Errorf("this edition is %s, which Amazon's Send-to-Kindle email no longer accepts — please choose an EPUB or PDF edition", strings.ToUpper(format))
-	}
-
-	mimeType := getMimeType(format)
-
-	filename := sanitizeFilename(b.Title) + "." + format
-	if strings.TrimSuffix(strings.ToLower(filename), "."+format) == "" {
-		filename = b.Hash + "." + format // guard against an empty/garbled title
-	}
-
-	// Send email using helper function
-	subject := "Book: " + b.Title
-	sendErr := SendFileToKindle(fileData, filename, mimeType, subject, smtpHost, smtpPort, smtpUser, smtpPassword, fromEmail, kindleEmail)
-	if sendErr != nil {
-		return sendErr
-	}
-
-	l.Info("Book sent to Kindle successfully",
-		zap.String("title", b.Title),
-		zap.String("kindle_email", kindleEmail),
-	)
-
-	return nil
+	return fmt.Errorf("couldn't deliver %q to Kindle%s: %w", b.Title, altNote, firstErr)
 }
 
 func (b *Book) String() string {

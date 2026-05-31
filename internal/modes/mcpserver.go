@@ -71,6 +71,7 @@ const (
 	DownloadHashDesc   = "MD5 hash of the book to download - get this from the search results"
 	DownloadTitleDesc  = "Book title - used for the filename and email subject. Get this from search results."
 	DownloadFormatDesc = "Book format (epub, mobi, pdf, azw3, etc.) - get this from search results. The actual format will be detected from the downloaded file, but this helps with initial filename."
+	DownloadAuthorDesc = "Author(s) of the book, from the search result. Used to safely fall back to another edition of the SAME book if the chosen file can't be sent."
 	DownloadKindleDesc = "Optional: Kindle email address to send the book to. If not specified, uses the default KINDLE_EMAIL from server configuration."
 )
 
@@ -85,6 +86,7 @@ type DownloadParams struct {
 	BookHash    string `json:"hash" mcp:"MD5 hash of the book to download"`
 	Title       string `json:"title" mcp:"Book title, used for filename"`
 	Format      string `json:"format" mcp:"Book format, for example pdf or epub"`
+	Author      string `json:"author,omitempty" mcp:"Book author(s) from the search result. Used to safely fall back to another edition if the chosen file can't be sent."`
 	KindleEmail string `json:"kindle_email,omitempty" mcp:"Optional Kindle email to send the book to. If not specified, uses the default configured KINDLE_EMAIL."`
 }
 
@@ -99,6 +101,7 @@ func addToolsToServer(server *mcp.Server) {
 			mcp.Property("hash", mcp.Description(DownloadHashDesc)),
 			mcp.Property("title", mcp.Description(DownloadTitleDesc)),
 			mcp.Property("format", mcp.Description(DownloadFormatDesc)),
+			mcp.Property("author", mcp.Description(DownloadAuthorDesc)),
 			mcp.Property("kindle_email", mcp.Description(DownloadKindleDesc)),
 		)),
 	)
@@ -142,6 +145,10 @@ func getToolsListJSON() []map[string]interface{} {
 					"format": map[string]interface{}{
 						"type":        "string",
 						"description": DownloadFormatDesc,
+					},
+					"author": map[string]interface{}{
+						"type":        "string",
+						"description": DownloadAuthorDesc,
 					},
 					"kindle_email": map[string]interface{}{
 						"type":        "string",
@@ -311,9 +318,10 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 	title := params.Arguments.Title
 	format := params.Arguments.Format
 	book := &anna.Book{
-		Hash:   params.Arguments.BookHash,
-		Title:  title,
-		Format: format,
+		Hash:    params.Arguments.BookHash,
+		Title:   title,
+		Format:  format,
+		Authors: params.Arguments.Author,
 	}
 
 	// Email the book to the Kindle. We deliberately do NOT fall back to a
