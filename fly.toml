@@ -11,10 +11,10 @@ primary_region = "ewr"
   force_https = true
   auto_stop_machines = "stop"
   auto_start_machines = true
-  # Keep one machine warm so the user's FIRST request after idle doesn't pay a
-  # cold start that can exceed the webapp's 60s request timeout (negligible cost
-  # at 256mb). The machine still auto-starts extras under load.
-  min_machines_running = 1
+  # Scale to zero when idle to avoid any always-on cost. Trade-off: the first
+  # request after idle pays a cold start (the webapp now shows a graceful error
+  # + retry rather than a silent stall if that ever exceeds the timeout).
+  min_machines_running = 0
 
   # Health check so Fly (and any external uptime monitor) can see the app is up.
   [[http_service.checks]]
