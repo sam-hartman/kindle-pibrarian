@@ -335,6 +335,7 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 			msg += " " + err.Error()
 		}
 		return &mcp.CallToolResultFor[any]{
+			IsError: true,
 			Content: []mcp.Content{&mcp.TextContent{Text: msg}},
 		}, nil
 	}
