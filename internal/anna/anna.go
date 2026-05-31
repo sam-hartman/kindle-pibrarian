@@ -128,6 +128,12 @@ func SendFileToKindle(fileData []byte, filename, mimeType, subject, smtpHost, sm
 			)
 			fileData = cleaned
 		}
+		// Validate the (now-sanitized) EPUB. Reject DRM / structurally broken
+		// files up front with a clear reason, so the user can pick another edition
+		// instead of getting a silent E999 from Amazon hours later.
+		if err := ValidateEPUB(fileData); err != nil {
+			return fmt.Errorf("this EPUB can't be sent to Kindle: %w", err)
+		}
 	}
 
 	// Gmail has a 25MB attachment limit. Base64 encoding increases size by ~33%,
@@ -250,7 +256,12 @@ func detectFileFormat(contentType string, fileData []byte) (format string, mimeT
 		return "pdf", getMimeType("pdf")
 	}
 	if len(fileData) >= 2 && string(fileData[0:2]) == "PK" {
-		return "epub", getMimeType("epub")
+		// A zip that starts with PK is only an EPUB if it actually contains EPUB
+		// structure; CBZ/DOCX/ODT also start with PK and Amazon rejects them.
+		if isEPUBZip(fileData) {
+			return "epub", getMimeType("epub")
+		}
+		return "unknown", "application/octet-stream"
 	}
 	// MOBI: check at offset 60 (PalmDOC format) or offset 0
 	if len(fileData) >= 68 && string(fileData[60:68]) == "BOOKMOBI" {
@@ -420,6 +431,20 @@ func downloadFileData(hash, secretKey string) ([]byte, error) {
 			downloadResp.Body.Close()
 			if err != nil {
 				lastErr = fmt.Errorf("failed to read file: %w", err)
+				fileData = nil
+				continue
+			}
+
+			// Guard against HTML interstitials / captcha pages / truncated bodies
+			// being saved or emailed as a book. detectFileFormat returns "unknown"
+			// for anything that isn't a recognized ebook (PDF/EPUB/MOBI/AZW3).
+			if detectedFormat, _ := detectFileFormat("", fileData); detectedFormat == "unknown" {
+				l.Warn("Download returned a non-book response; trying next server",
+					zap.Int("domainIndex", domainIndex),
+					zap.Int("size", len(fileData)),
+				)
+				lastErr = fmt.Errorf("download returned a non-book response (%d bytes)", len(fileData))
+				fileData = nil
 				continue
 			}
 
@@ -790,32 +815,25 @@ func (b *Book) EmailToKindle(secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 		)
 	}
 
-	// Use detected format if available, otherwise fall back to search result format
+	// Trust content detection, not the agent-supplied format. detectFileFormat
+	// validates EPUB structure, so "unknown" here means the download was corrupt
+	// or an error page rather than a real ebook.
 	format := actualFormat
 	if format == "unknown" {
-		format = b.Format
+		return fmt.Errorf("the downloaded file for %q is not a recognized ebook (likely a corrupt download or an error page) — try another edition", b.Title)
 	}
+
+	// Amazon's email Send-to-Kindle no longer accepts MOBI/AZW. Fail fast with an
+	// actionable message instead of emailing a file Amazon will silently reject.
+	if format == "mobi" || format == "azw" || format == "azw3" {
+		return fmt.Errorf("this edition is %s, which Amazon's Send-to-Kindle email no longer accepts — please choose an EPUB or PDF edition", strings.ToUpper(format))
+	}
+
 	mimeType := getMimeType(format)
 
-	// Kindle email service doesn't accept MOBI files - only PDF, EPUB, DOC, DOCX, HTML, RTF, TXT
-	// If we detect MOBI, we should warn and potentially convert or skip email
-	if format == "mobi" {
-		l.Warn("MOBI format detected - Kindle email service doesn't accept MOBI files",
-			zap.String("title", b.Title),
-			zap.String("format", format),
-		)
-		// We'll still try to send it, but it will likely be rejected by Amazon
-		// In the future, we could add MOBI to EPUB conversion here
-	}
-
 	filename := sanitizeFilename(b.Title) + "." + format
-
-	// Log format detection for debugging
-	if actualFormat != "unknown" && actualFormat != strings.ToLower(b.Format) {
-		l.Info("File format mismatch detected",
-			zap.String("expected_format", b.Format),
-			zap.String("actual_format", actualFormat),
-		)
+	if strings.TrimSuffix(strings.ToLower(filename), "."+format) == "" {
+		filename = b.Hash + "." + format // guard against an empty/garbled title
 	}
 
 	// Send email using helper function

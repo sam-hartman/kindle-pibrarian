@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sam-hartman/kindle-pibrarian/internal/anna"
 	"github.com/sam-hartman/kindle-pibrarian/internal/goodreads"
 	"github.com/sam-hartman/kindle-pibrarian/internal/logger"
 	"github.com/sam-hartman/kindle-pibrarian/internal/version"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.uber.org/zap"
 )
 
@@ -66,12 +66,12 @@ const (
 	DownloadToolDescription = "Download a book and send it to a Kindle email. The book is downloaded from Anna's Archive, saved locally as a backup (if ANNAS_DOWNLOAD_PATH is set), and then emailed to the specified Kindle email address. If no kindle_email is provided, uses the default configured KINDLE_EMAIL. Requires ANNAS_SECRET_KEY for API access and email configuration (SMTP settings) for Kindle delivery. If email is not configured, falls back to local download only. Note: Kindle email only accepts PDF, EPUB, DOC, DOCX, HTML, RTF, and TXT formats - MOBI files will be rejected."
 
 	// Parameter descriptions
-	SearchTermDesc       = "Search term - can be book title, author name, or any keywords"
-	SearchFormatDesc     = "Optional: Preferred format (epub, pdf, mobi). Defaults to 'epub' for Kindle compatibility. EPUBs are recommended as they are small (0.5-5MB), reflowable, and work best on Kindle devices."
-	DownloadHashDesc     = "MD5 hash of the book to download - get this from the search results"
-	DownloadTitleDesc    = "Book title - used for the filename and email subject. Get this from search results."
-	DownloadFormatDesc   = "Book format (epub, mobi, pdf, azw3, etc.) - get this from search results. The actual format will be detected from the downloaded file, but this helps with initial filename."
-	DownloadKindleDesc   = "Optional: Kindle email address to send the book to. If not specified, uses the default KINDLE_EMAIL from server configuration."
+	SearchTermDesc     = "Search term - can be book title, author name, or any keywords"
+	SearchFormatDesc   = "Optional: Preferred format (epub, pdf, mobi). Defaults to 'epub' for Kindle compatibility. EPUBs are recommended as they are small (0.5-5MB), reflowable, and work best on Kindle devices."
+	DownloadHashDesc   = "MD5 hash of the book to download - get this from the search results"
+	DownloadTitleDesc  = "Book title - used for the filename and email subject. Get this from search results."
+	DownloadFormatDesc = "Book format (epub, mobi, pdf, azw3, etc.) - get this from search results. The actual format will be detected from the downloaded file, but this helps with initial filename."
+	DownloadKindleDesc = "Optional: Kindle email address to send the book to. If not specified, uses the default KINDLE_EMAIL from server configuration."
 )
 
 // SearchParams defines parameters for the search tool
@@ -231,7 +231,7 @@ func SearchTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTool
 			bookList += "\n\n"
 		}
 	}
-	
+
 	if len(books) == 0 {
 		bookList = "No books found for your search term."
 	}
@@ -257,7 +257,7 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 	l := logger.GetLogger()
 
 	hash := params.Arguments.BookHash
-	
+
 	// Determine which Kindle email to use: provided or default (need this first for duplicate check)
 	kindleEmail := params.Arguments.KindleEmail
 	if kindleEmail == "" {
@@ -275,7 +275,7 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 	downloadTrackerMu.RLock()
 	lastDownload, recentlyDownloaded := downloadTracker[trackerKey]
 	downloadTrackerMu.RUnlock()
-	
+
 	if recentlyDownloaded {
 		timeSinceLastDownload := time.Since(lastDownload)
 		if timeSinceLastDownload < downloadCooldown {
@@ -293,11 +293,6 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 			}, nil
 		}
 	}
-	
-	// Record this download attempt
-	downloadTrackerMu.Lock()
-	downloadTracker[trackerKey] = time.Now()
-	downloadTrackerMu.Unlock()
 
 	l.Info("Download command called",
 		zap.String("bookHash", hash),
@@ -312,7 +307,6 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 		return nil, err
 	}
 	secretKey := env.SecretKey
-	downloadPath := env.DownloadPath
 
 	title := params.Arguments.Title
 	format := params.Arguments.Format
@@ -322,41 +316,34 @@ func DownloadTool(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallTo
 		Format: format,
 	}
 
-	// Try to email to Kindle first, fall back to regular download if email not configured or file too large
+	// Email the book to the Kindle. We deliberately do NOT fall back to a
+	// server-local download: the user cannot reach the Pi/Fly filesystem, so
+	// reporting a local save as "success" would be a lie. On failure, surface a
+	// clear, actionable reason and do NOT record the cooldown, so a corrected
+	// retry (e.g. a different edition) isn't blocked.
 	err = book.EmailToKindle(secretKey, env.SMTPHost, env.SMTPPort, env.SMTPUser, env.SMTPPassword, env.FromEmail, kindleEmail)
 	if err != nil {
-		shouldFallback, fallbackReason := checkEmailFallback(err)
-		if shouldFallback {
-			l.Info("Falling back to regular download",
-				zap.String("reason", fallbackReason),
-				zap.String("original_error", err.Error()),
-			)
-			err = book.Download(secretKey, downloadPath)
-			if err != nil {
-				l.Error("Download command failed",
-					zap.String("bookHash", params.Arguments.BookHash),
-					zap.String("downloadPath", downloadPath),
-					zap.Error(err),
-				)
-				return nil, err
-			}
-			l.Info("Download command completed successfully",
-				zap.String("bookHash", params.Arguments.BookHash),
-				zap.String("downloadPath", downloadPath),
-			)
-			return &mcp.CallToolResultFor[any]{
-				Content: []mcp.Content{&mcp.TextContent{
-					Text: fmt.Sprintf("Book downloaded successfully to path: %s\n\n%s\n\nThe file was saved locally instead of emailing to Kindle.", downloadPath, fallbackReason),
-				}},
-			}, nil
-		}
-		// Email failed for another reason that we can't recover from
-		l.Error("Failed to email book to Kindle",
+		l.Error("Failed to send book to Kindle",
 			zap.String("bookHash", params.Arguments.BookHash),
 			zap.Error(err),
 		)
-		return nil, err
+		_, reason := checkEmailFallback(err)
+		msg := "Sorry — I couldn't send that book to the Kindle."
+		if reason != "" {
+			msg += " " + reason
+		} else {
+			msg += " " + err.Error()
+		}
+		return &mcp.CallToolResultFor[any]{
+			Content: []mcp.Content{&mcp.TextContent{Text: msg}},
+		}, nil
 	}
+
+	// Record the successful send for duplicate suppression — only on success, so a
+	// failed attempt never blocks an immediate retry.
+	downloadTrackerMu.Lock()
+	downloadTracker[trackerKey] = time.Now()
+	downloadTrackerMu.Unlock()
 
 	l.Info("Book sent to Kindle successfully",
 		zap.String("bookHash", params.Arguments.BookHash),
@@ -605,7 +592,7 @@ func StartMCPHTTPServer(port string) {
 			}
 
 			if callErr != nil {
-				l.Error("Tool execution failed", 
+				l.Error("Tool execution failed",
 					zap.String("tool", params.Name),
 					zap.Error(callErr),
 				)
