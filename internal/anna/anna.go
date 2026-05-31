@@ -2,10 +2,8 @@ package anna
 
 import (
 	"bytes"
-	"crypto/tls"
 	"encoding/base64"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"encoding/json"
@@ -18,16 +16,14 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	colly "github.com/gocolly/colly/v2"
 	"github.com/sam-hartman/kindle-pibrarian/internal/logger"
 	"github.com/sam-hartman/kindle-pibrarian/internal/relay"
 	"go.uber.org/zap"
 )
 
-const (
-	AnnasSearchEndpoint   = "https://annas-archive.li/search?q=%s"
-	AnnasDownloadEndpoint = "https://annas-archive.li/dyn/api/fast_download.json?md5=%s&key=%s&domain_index=%d"
-)
+// Anna's Archive base URLs are configurable and tried in order; see domains.go
+// (ANNAS_BASE_URLS env override). The old hardcoded annas-archive.li endpoints
+// were removed because that domain is now parked.
 
 // Supported formats and languages
 var (
@@ -355,87 +351,92 @@ func downloadFileData(hash, secretKey string) ([]byte, error) {
 	var fileData []byte
 	var lastErr error
 
-	// Try different domain indices (download servers) until one works
-	for domainIndex := 0; domainIndex <= 4; domainIndex++ {
-		apiURL := fmt.Sprintf(AnnasDownloadEndpoint, hash, secretKey, domainIndex)
-		l.Info("Fetching download URL from Anna's Archive API",
-			zap.String("hash", hash),
-			zap.Int("domainIndex", domainIndex),
-		)
+	// Try each mirror, then each download server (domain_index), until one works.
+	for _, base := range annasBases() {
+		for domainIndex := 0; domainIndex <= 4; domainIndex++ {
+			apiURL := annasDownloadURL(base, hash, secretKey, domainIndex)
+			l.Info("Fetching download URL from Anna's Archive API",
+				zap.String("hash", hash),
+				zap.Int("domainIndex", domainIndex),
+			)
 
-		resp, err := http.Get(apiURL)
-		if err != nil {
-			lastErr = fmt.Errorf("failed to get download URL: %w", err)
-			continue
-		}
+			resp, err := http.Get(apiURL)
+			if err != nil {
+				lastErr = fmt.Errorf("failed to get download URL: %w", err)
+				continue
+			}
 
-		var apiResp fastDownloadResponse
-		if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+			var apiResp fastDownloadResponse
+			if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+				resp.Body.Close()
+				lastErr = fmt.Errorf("failed to decode API response: %w", err)
+				continue
+			}
 			resp.Body.Close()
-			lastErr = fmt.Errorf("failed to decode API response: %w", err)
-			continue
-		}
-		resp.Body.Close()
 
-		// Check HTTP status code first
-		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-			if apiResp.Error != "" {
-				lastErr = fmt.Errorf("API error (status %d): %s", resp.StatusCode, apiResp.Error)
-			} else {
-				lastErr = fmt.Errorf("API request failed with status code: %d", resp.StatusCode)
+			// Check HTTP status code first
+			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+				if apiResp.Error != "" {
+					lastErr = fmt.Errorf("API error (status %d): %s", resp.StatusCode, apiResp.Error)
+				} else {
+					lastErr = fmt.Errorf("API request failed with status code: %d", resp.StatusCode)
+				}
+				continue
 			}
-			continue
-		}
 
-		if apiResp.DownloadURL == "" {
-			if apiResp.Error != "" {
-				lastErr = fmt.Errorf("Anna's Archive API error: %s", apiResp.Error)
-			} else {
-				lastErr = errors.New("failed to get download URL from API")
+			if apiResp.DownloadURL == "" {
+				if apiResp.Error != "" {
+					lastErr = fmt.Errorf("Anna's Archive API error: %s", apiResp.Error)
+				} else {
+					lastErr = errors.New("failed to get download URL from API")
+				}
+				continue
 			}
-			continue
-		}
 
-		// Create HTTP client with timeout
-		client := &http.Client{Timeout: 60 * time.Second}
-		downloadResp, err := client.Get(apiResp.DownloadURL)
-		if err != nil {
-			l.Warn("Download server failed, trying next",
-				zap.Int("domainIndex", domainIndex),
-				zap.Error(err),
-			)
-			lastErr = fmt.Errorf("failed to download file: %w", err)
-			continue
-		}
+			// Create HTTP client with timeout
+			client := &http.Client{Timeout: 60 * time.Second}
+			downloadResp, err := client.Get(apiResp.DownloadURL)
+			if err != nil {
+				l.Warn("Download server failed, trying next",
+					zap.Int("domainIndex", domainIndex),
+					zap.Error(err),
+				)
+				lastErr = fmt.Errorf("failed to download file: %w", err)
+				continue
+			}
 
-		if downloadResp.StatusCode != http.StatusOK {
+			if downloadResp.StatusCode != http.StatusOK {
+				downloadResp.Body.Close()
+				l.Warn("Download server returned non-200, trying next",
+					zap.Int("domainIndex", domainIndex),
+					zap.Int("status", downloadResp.StatusCode),
+				)
+				lastErr = fmt.Errorf("download server returned status %d", downloadResp.StatusCode)
+				continue
+			}
+
+			// Successfully connected, read the file
+			fileData, err = io.ReadAll(downloadResp.Body)
 			downloadResp.Body.Close()
-			l.Warn("Download server returned non-200, trying next",
+			if err != nil {
+				lastErr = fmt.Errorf("failed to read file: %w", err)
+				continue
+			}
+
+			l.Info("Successfully downloaded from server",
 				zap.Int("domainIndex", domainIndex),
-				zap.Int("status", downloadResp.StatusCode),
+				zap.Int("size", len(fileData)),
 			)
-			lastErr = fmt.Errorf("download server returned status %d", downloadResp.StatusCode)
-			continue
+			break
 		}
-
-		// Successfully connected, read the file
-		fileData, err = io.ReadAll(downloadResp.Body)
-		downloadResp.Body.Close()
-		if err != nil {
-			lastErr = fmt.Errorf("failed to read file: %w", err)
-			continue
+		if len(fileData) > 0 {
+			break
 		}
-
-		l.Info("Successfully downloaded from server",
-			zap.Int("domainIndex", domainIndex),
-			zap.Int("size", len(fileData)),
-		)
-		break
 	}
 
 	if len(fileData) == 0 {
 		if lastErr != nil {
-			return nil, fmt.Errorf("all download servers failed: %w", lastErr)
+			return nil, fmt.Errorf("all download servers/mirrors failed: %w", lastErr)
 		}
 		return nil, errors.New("failed to download file from any server")
 	}
@@ -457,73 +458,8 @@ func FindBookWithFormat(query, preferredFormat string) ([]*Book, error) {
 		return findBookViaRelay(query, preferredFormat)
 	}
 
-	c := colly.NewCollector(
-		colly.Async(true),
-	)
-
-	// Configure HTTP client with TLS support
-	// Using more compatible TLS settings
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-			ServerName:         "annas-archive.li", // Updated to new domain
-		},
-		DisableCompression: false,
-		ForceAttemptHTTP2:  false, // Use HTTP/1.1
-	}
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   30 * time.Second,
-	}
-	c.SetClient(client)
-
-	// Set user agent to avoid being blocked
-	c.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
-	bookList := make([]*colly.HTMLElement, 0)
-
-	// Look for book entries - Anna's Archive uses specific structures
-	c.OnHTML("a[href^='/md5/']", func(e *colly.HTMLElement) {
-		bookList = append(bookList, e)
-		l.Debug("Found book link", zap.String("href", e.Attr("href")))
-	})
-
-	// Also try to find book cards/items directly
-	c.OnHTML("[class*='book'], [class*='item'], [class*='result']", func(e *colly.HTMLElement) {
-		link := e.DOM.Find("a[href^='/md5/']").First()
-		if link.Length() > 0 {
-			href, _ := link.Attr("href")
-			if href != "" {
-				// Create a temporary element for this book
-				tempE := &colly.HTMLElement{
-					DOM:      link,
-					Request:  e.Request,
-					Response: e.Response,
-				}
-				bookList = append(bookList, tempE)
-			}
-		}
-	})
-
-	c.OnRequest(func(r *colly.Request) {
-		l.Info("Visiting URL", zap.String("url", r.URL.String()))
-		r.Headers.Set("User-Agent", c.UserAgent)
-		r.Headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-		r.Headers.Set("Accept-Language", "en-US,en;q=0.5")
-	})
-
-	c.OnError(func(r *colly.Response, err error) {
-		l.Error("Request failed", zap.String("url", r.Request.URL.String()), zap.Error(err))
-	})
-
-	c.OnResponse(func(r *colly.Response) {
-		l.Info("Received response", zap.String("url", r.Request.URL.String()), zap.Int("status", r.StatusCode), zap.Int("size", len(r.Body)))
-	})
-
-	fullURL := fmt.Sprintf(AnnasSearchEndpoint, url.QueryEscape(query))
-	l.Info("Starting search", zap.String("query", query), zap.String("url", fullURL))
-	c.Visit(fullURL)
-	c.Wait()
+	l.Info("Starting search", zap.String("query", query))
+	bookList := scrapeSearch(query)
 	l.Info("Search completed", zap.Int("linksFound", len(bookList)))
 
 	bookListParsed := make([]*Book, 0)
@@ -901,4 +837,3 @@ func (b *Book) String() string {
 	return fmt.Sprintf("Title: %s\nAuthors: %s\nPublisher: %s\nLanguage: %s\nFormat: %s\nSize: %s\nURL: %s\nHash: %s",
 		b.Title, b.Authors, b.Publisher, b.Language, b.Format, b.Size, b.URL, b.Hash)
 }
-
