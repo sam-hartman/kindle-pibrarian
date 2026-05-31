@@ -115,6 +115,25 @@ func cleanTitle(title string) string {
 func SendFileToKindle(fileData []byte, filename, mimeType, subject, smtpHost, smtpPort, smtpUser, smtpPassword, fromEmail, kindleEmail string) error {
 	l := logger.GetLogger()
 
+	// Sanitize EPUBs before sending. Many Anna's Archive EPUBs were round-tripped
+	// out of Amazon's ecosystem and carry invalid data-Amzn* XHTML attributes that
+	// make Amazon's own Send-to-Kindle converter fail with "E999 - Send to Kindle
+	// Internal Error". Stripping them yields a spec-compliant (epubcheck-clean)
+	// EPUB that Amazon converts normally. No-op for non-EPUB or already-clean files.
+	if mimeType == "application/epub+zip" || strings.HasSuffix(strings.ToLower(filename), ".epub") {
+		if cleaned, stripped, err := SanitizeEPUB(fileData); err != nil {
+			l.Warn("EPUB sanitize failed; sending original", zap.Error(err))
+		} else if stripped > 0 {
+			l.Info("Sanitized EPUB before sending to Kindle",
+				zap.String("filename", filename),
+				zap.Int("stripped_attrs", stripped),
+				zap.Int("bytes_before", len(fileData)),
+				zap.Int("bytes_after", len(cleaned)),
+			)
+			fileData = cleaned
+		}
+	}
+
 	// Gmail has a 25MB attachment limit. Base64 encoding increases size by ~33%,
 	// so we need to check if the original file is under ~19MB (19MB * 1.33 ≈ 25MB)
 	// Adding some overhead for email headers, we'll use 18MB as the limit
