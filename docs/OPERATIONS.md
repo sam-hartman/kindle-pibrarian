@@ -19,6 +19,18 @@ ssh samuelhartman@192.168.1.201 \
 Use `git reset --hard origin/main` (not `git pull`) so a deploy can't silently
 no-op on a local-edit conflict.
 
+Notes (fixed 2026-06-01):
+- `~/annas-mcp-server` is now a clean clone of **`sam-hartman/kindle-pibrarian`**
+  over **HTTPS** (public, no auth, no SSH host-key prompt). Previously it was a
+  broken non-repo whose `origin` pointed at an empty `sam-hartman-mistral/
+  annas-mcp-server` over SSH, so it had been running an old loose-file binary.
+- `.env` (secrets) lives at `~/annas-mcp-server/.env` and is loaded by the
+  systemd unit via `EnvironmentFile`. Preserve it across redeploys; a fresh
+  clone won't include it.
+- The previous directory was backed up to `~/annas-mcp-server.bak.<timestamp>`.
+- The Pi authenticates SSH via Secretive (Secure Enclave, Touch ID) for keys, or
+  a password — so unattended/background deploys can't sign; deploy interactively.
+
 **Fly (proxy + fly.toml like min_machines_running / health check):**
 ```bash
 cd ~/kindle-pibrarian && flyctl deploy
