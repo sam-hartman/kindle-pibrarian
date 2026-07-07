@@ -161,6 +161,29 @@ func getToolsListJSON() []map[string]interface{} {
 	}
 }
 
+// parseDownloadArgs extracts DownloadParams from a JSON-RPC arguments map.
+// It deliberately includes the optional "author" field: the safe
+// alternate-edition fallback only runs when the author is known, so dropping it
+// here (as an earlier version did) silently disabled that safety net and could
+// let a failed send go unrescued. Returns an error if a required field is empty.
+func parseDownloadArgs(args map[string]interface{}) (DownloadParams, error) {
+	hash, _ := args["hash"].(string)
+	title, _ := args["title"].(string)
+	format, _ := args["format"].(string)
+	author, _ := args["author"].(string)            // optional
+	kindleEmail, _ := args["kindle_email"].(string) // optional
+	if hash == "" || title == "" || format == "" {
+		return DownloadParams{}, fmt.Errorf("hash, title, and format are required")
+	}
+	return DownloadParams{
+		BookHash:    hash,
+		Title:       title,
+		Format:      format,
+		Author:      author,
+		KindleEmail: kindleEmail,
+	}, nil
+}
+
 // checkEmailFallback checks if an email error should trigger a fallback to local download.
 // Returns (shouldFallback, fallbackReason).
 func checkEmailFallback(err error) (bool, string) {
@@ -577,22 +600,12 @@ func StartMCPHTTPServer(port string) {
 				result, callErr = SearchTool(ctx, nil, searchParams)
 
 			case "download":
-				hash, _ := params.Arguments["hash"].(string)
-				title, _ := params.Arguments["title"].(string)
-				format, _ := params.Arguments["format"].(string)
-				kindleEmail, _ := params.Arguments["kindle_email"].(string) // Optional
-				if hash == "" || title == "" || format == "" {
-					sendJSONRPCError(w, jsonRPCReq.ID, -32602, "Invalid params", "hash, title, and format are required")
+				dlArgs, perr := parseDownloadArgs(params.Arguments)
+				if perr != nil {
+					sendJSONRPCError(w, jsonRPCReq.ID, -32602, "Invalid params", perr.Error())
 					return
 				}
-				downloadParams := &mcp.CallToolParamsFor[DownloadParams]{
-					Arguments: DownloadParams{
-						BookHash:    hash,
-						Title:       title,
-						Format:      format,
-						KindleEmail: kindleEmail,
-					},
-				}
+				downloadParams := &mcp.CallToolParamsFor[DownloadParams]{Arguments: dlArgs}
 				result, callErr = DownloadTool(ctx, nil, downloadParams)
 
 			default:

@@ -46,6 +46,26 @@ func sendOneEdition(b *Book, secretKey, smtpHost, smtpPort, smtpUser, smtpPasswo
 	if actualFormat == "unknown" {
 		return fmt.Errorf("the downloaded file for %q is not a recognized ebook (likely a corrupt download or an error page)", b.Title)
 	}
+
+	// PDFs read poorly on Kindle and large ones exceed the email size cap, so a
+	// PDF-only book often can't be delivered at all. Convert to EPUB first when a
+	// converter is available. Best-effort: on any failure we send the original
+	// PDF unchanged, so this never regresses PDF delivery.
+	if actualFormat == "pdf" {
+		if epubData, cerr := ConvertPDFToEPUB(fileData); cerr != nil {
+			l.Warn("PDF→EPUB conversion skipped; sending original PDF",
+				zap.String("title", b.Title), zap.Error(cerr))
+		} else {
+			l.Info("Converted PDF to EPUB before sending",
+				zap.String("title", b.Title),
+				zap.Int("pdf_bytes", len(fileData)),
+				zap.Int("epub_bytes", len(epubData)),
+			)
+			fileData = epubData
+			actualFormat = "epub"
+		}
+	}
+
 	if actualFormat == "mobi" || actualFormat == "azw" || actualFormat == "azw3" {
 		return fmt.Errorf("this edition is %s, which Amazon's Send-to-Kindle email no longer accepts", strings.ToUpper(actualFormat))
 	}
