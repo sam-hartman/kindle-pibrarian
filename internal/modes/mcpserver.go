@@ -622,28 +622,12 @@ func StartMCPHTTPServer(port string) {
 				return
 			}
 
-			// Convert result to JSON-RPC format
-			content := []map[string]interface{}{}
-			for _, c := range result.Content {
-				if textContent, ok := c.(*mcp.TextContent); ok {
-					content = append(content, map[string]interface{}{
-						"type": "text",
-						"text": textContent.Text,
-					})
-				}
-			}
-
-			// Include StructuredContent if available (e.g., Book structs from search)
-			resultMap := map[string]interface{}{
-				"content": content,
-			}
-			if result.StructuredContent != nil {
-				resultMap["structuredContent"] = result.StructuredContent
-			}
+			resultMap := toolResultMap(result)
 
 			l.Info("Tool execution successful",
 				zap.String("tool", params.Name),
-				zap.Int("contentItems", len(content)),
+				zap.Int("contentItems", len(result.Content)),
+				zap.Bool("isError", result.IsError),
 			)
 
 			jsonRPCResp = map[string]interface{}{
@@ -778,4 +762,28 @@ func sendJSONRPCError(w http.ResponseWriter, id interface{}, code int, message, 
 			"data":    data,
 		},
 	})
+}
+
+// toolResultMap converts a tool result to the JSON-RPC "result" object. It
+// must carry isError: the Fly app's relay client relies on it to tell a failed
+// Kindle send from a delivered one.
+func toolResultMap(result *mcp.CallToolResultFor[any]) map[string]interface{} {
+	content := []map[string]interface{}{}
+	for _, c := range result.Content {
+		if textContent, ok := c.(*mcp.TextContent); ok {
+			content = append(content, map[string]interface{}{
+				"type": "text",
+				"text": textContent.Text,
+			})
+		}
+	}
+	resultMap := map[string]interface{}{"content": content}
+	// Include StructuredContent if available (e.g., Book structs from search)
+	if result.StructuredContent != nil {
+		resultMap["structuredContent"] = result.StructuredContent
+	}
+	if result.IsError {
+		resultMap["isError"] = true
+	}
+	return resultMap
 }

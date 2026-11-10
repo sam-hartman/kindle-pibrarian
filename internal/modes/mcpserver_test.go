@@ -1,6 +1,10 @@
 package modes
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
 
 // The HTTP JSON-RPC download handler previously dropped the "author" argument,
 // which disabled the safe alternate-edition fallback on the Pi (it only runs
@@ -51,5 +55,21 @@ func TestParseDownloadArgs_MissingRequired(t *testing.T) {
 		if _, err := parseDownloadArgs(args); err == nil {
 			t.Errorf("%s: expected error, got nil", name)
 		}
+	}
+}
+
+func TestToolResultMap_PropagatesIsError(t *testing.T) {
+	failed := toolResultMap(&mcp.CallToolResultFor[any]{
+		IsError: true,
+		Content: []mcp.Content{&mcp.TextContent{Text: "Sorry — I couldn't send that book."}},
+	})
+	if failed["isError"] != true {
+		t.Fatalf("failed send must carry isError=true, got %v", failed)
+	}
+	ok := toolResultMap(&mcp.CallToolResultFor[any]{
+		Content: []mcp.Content{&mcp.TextContent{Text: "Book sent"}},
+	})
+	if _, present := ok["isError"]; present {
+		t.Fatalf("successful result must not set isError, got %v", ok)
 	}
 }
