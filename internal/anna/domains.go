@@ -2,11 +2,9 @@ package anna
 
 import (
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/gocolly/colly/v2"
 	"go.uber.org/zap"
@@ -74,7 +72,7 @@ func scrapeSearchOnce(base, query string) []*colly.HTMLElement {
 	c := colly.NewCollector(colly.Async(true))
 	// Standard TLS verification (no InsecureSkipVerify) — a bad mirror should
 	// fail and fall through to the next, not be silently trusted.
-	c.SetClient(&http.Client{Timeout: 30 * time.Second})
+	c.SetClient(searchHTTPClient())
 	c.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 	bookList := make([]*colly.HTMLElement, 0)
