@@ -500,6 +500,21 @@ func FindBookWithFormat(query, preferredFormat string) ([]*Book, error) {
 		}
 		seenHashes[hash] = true
 
+		// The "Recent downloads" ticker links to unrelated books.
+		if isRecentDownloadsLink(e.DOM) {
+			continue
+		}
+
+		// Current Anna's Archive result-row markup (see searchparse.go).
+		if book, ok := parseResultRow(e.DOM); ok {
+			if book.Hash == hash {
+				book.URL = e.Request.AbsoluteURL(link)
+				bookListParsed = append(bookListParsed, book)
+			}
+			continue
+		}
+
+		// Legacy heuristics for older markup.
 		// Navigate up the DOM to find the book container
 		// Anna's Archive typically has the book info in a parent container
 		container := e.DOM.Closest("div, article, section, li")
