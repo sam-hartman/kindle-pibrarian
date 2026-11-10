@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/sam-hartman/kindle-pibrarian/internal/logger"
 	"github.com/sam-hartman/kindle-pibrarian/internal/relay"
@@ -39,6 +41,10 @@ type jsonRPCResponse struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
+
+	// errText is the joined text content of an isError result, filled in by
+	// decodeJSONRPC. It is raw; run it through relayErrorDetail before showing it.
+	errText string
 }
 
 // callRelayTool POSTs a JSON-RPC tools/call envelope to the Pi's
@@ -83,6 +89,9 @@ func callRelayTool(toolName string, args map[string]interface{}) (*jsonRPCRespon
 		return nil, fmt.Errorf("relay tool error: %s", parsed.Error.Message)
 	}
 	if parsed.Result != nil && parsed.Result.IsError {
+		if detail := relayErrorDetail(parsed.errText); detail != "" {
+			return nil, fmt.Errorf("relay tool failed: %s", detail)
+		}
 		return nil, fmt.Errorf("relay tool returned isError=true")
 	}
 	return parsed, nil
@@ -119,7 +128,63 @@ func decodeJSONRPC(body []byte) (*jsonRPCResponse, error) {
 	if err := json.Unmarshal(trimmed, &parsed); err != nil {
 		return nil, err
 	}
+	var content struct {
+		Result *struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(trimmed, &content) == nil && content.Result != nil {
+		var parts []string
+		for _, c := range content.Result.Content {
+			if c.Type == "text" && strings.TrimSpace(c.Text) != "" {
+				parts = append(parts, strings.TrimSpace(c.Text))
+			}
+		}
+		parsed.errText = strings.Join(parts, " ")
+	}
 	return &parsed, nil
+}
+
+const maxRelayErrorChars = 300
+
+var (
+	// The relay's error text can embed a request URL (Go's http client errors
+	// include the full URL, and Anna's download URL carries the API key as a
+	// query parameter), so URLs are removed wholesale.
+	relayURLRe = regexp.MustCompile(`(?i)\b(?:https?|wss?)://\S+`)
+	// key=..., token: ..., password "...", Bearer ..., etc.
+	relaySecretRe = regexp.MustCompile(`(?i)\b(api[_-]?key|secret[_-]?key|key|token|secret|passcode|passwd|password|pass|authorization)\b(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s&,;]+)`)
+	relayBearerRe = regexp.MustCompile(`(?i)\bbearer\s+\S+`)
+	// Long opaque strings (keys, tokens, app passwords). A bare 32-char hex md5
+	// is a book id, not a secret, and stays readable.
+	relayOpaqueRe = regexp.MustCompile(`[A-Za-z0-9_\-]{24,}`)
+	relayMD5Re    = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
+	relaySorryRe  = regexp.MustCompile(`^Sorry\s*[—–-]+\s*I couldn't send that book to the Kindle\.?\s*`)
+)
+
+// relayErrorDetail turns the relay's error text into something safe and short to
+// show a reader: secrets and URLs removed, the duplicate "Sorry" prefix dropped,
+// whitespace collapsed, truncated.
+func relayErrorDetail(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	text = relaySorryRe.ReplaceAllString(text, "")
+	text = relayURLRe.ReplaceAllString(text, "[url]")
+	text = relayBearerRe.ReplaceAllString(text, "Bearer [redacted]")
+	text = relaySecretRe.ReplaceAllString(text, "$1=[redacted]")
+	text = relayOpaqueRe.ReplaceAllStringFunc(text, func(m string) string {
+		if relayMD5Re.MatchString(m) {
+			return m
+		}
+		return "[redacted]"
+	})
+	text = strings.TrimSpace(text)
+	if r := []rune(text); len(r) > maxRelayErrorChars {
+		text = string(r[:maxRelayErrorChars]) + "..."
+	}
+	return text
 }
 
 func truncate(s string, n int) string {
